@@ -53,14 +53,12 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       await _cameraController!.startVideoRecording();
       setState(() {
         _isRecording = true;
-        _statusMessage = "🔴 RECORDING... Keep panning smoothly across all student faces!";
-      });
-
-      Future.delayed(const Duration(seconds: 6), () {
-        if (_isRecording) _stopRecordingAndAnalyze();
+        _statusMessage = "🔴 RECORDING... Tap the stop button when done panning!";
       });
     } catch (e) {
-      // Ignore in demo mode
+      setState(() {
+        _statusMessage = "Could not start recording: $e";
+      });
     }
   }
 
@@ -75,42 +73,39 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
         _statusMessage = "🧠 AI Face Recognition analyzing classroom frames... Please wait!";
       });
 
-      Map<String, dynamic> results;
       try {
-        results = await ApiService.scanVideo(widget.classId, File(videoFile.path));
-      } catch (e) {
-        // Mock fallback results if backend offline
-        results = {
-          "present_students": [
-            {"id": 1, "name": "Ada Lovelace", "roll_number": "CS-001"},
-            {"id": 2, "name": "Grace Hopper", "roll_number": "CS-002"},
-          ],
-          "absent_students": [
-            {"id": 3, "name": "Linus Torvalds", "roll_number": "CS-003"},
-          ]
-        };
-      }
+        final results = await ApiService.scanVideo(widget.classId, File(videoFile.path));
 
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => AttendanceReviewScreen(
-              classId: widget.classId,
-              className: widget.className,
-              initialPresent: List<Map<String, dynamic>>.from(results["present_students"]),
-              initialAbsent: List<Map<String, dynamic>>.from(results["absent_students"]),
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AttendanceReviewScreen(
+                classId: widget.classId,
+                className: widget.className,
+                initialPresent: List<Map<String, dynamic>>.from(results["present_students"]),
+                initialAbsent: List<Map<String, dynamic>>.from(results["absent_students"]),
+              ),
             ),
-          ),
-        );
+          );
+        }
+      } catch (e) {
+        // Show real error instead of injecting fake data
+        if (mounted) {
+          setState(() {
+            _isProcessing = false;
+            _statusMessage = "❌ Backend error: $e\n\nMake sure backend is running and try again.";
+          });
+        }
       }
     } catch (e) {
       setState(() {
         _isProcessing = false;
-        _statusMessage = "Error analyzing video: $e. Please try scanning again.";
+        _statusMessage = "Error stopping video: $e. Please try again.";
       });
     }
   }
+
 
   @override
   void dispose() {

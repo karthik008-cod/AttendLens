@@ -35,3 +35,11 @@ reports/*.xlsx
 /mobile/android/.gradle
 /mobile/android/local.properties
 /mobile/android/app/build/
+
+# IDE & Build
+.idea/
+**/build/
+
+# Backend Uploads & Reports
+backend/uploads/
+backend/reports/*.xlsx

@@ -1,7 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:mobile/services/api_service.dart';
 import 'package:mobile/theme/theme.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 class AttendanceReviewScreen extends StatefulWidget {
   final int classId;
@@ -47,12 +51,15 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
 
   Future<void> _saveAndGenerateExcel() async {
     setState(() => _isSaving = true);
-    final todayStr = DateTime.now().toIso8601String().split("T")[0]; // YYYY-MM-DD
+    final now = DateTime.now();
+    final hourStr = now.hour.toString().padLeft(2, '0');
+    final minStr = now.minute.toString().padLeft(2, '0');
+    final dateWithTimeStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} $hourStr:$minStr";
     final presentIds = _present.map((s) => s["id"] as int).toList();
     final absentIds = _absent.map((s) => s["id"] as int).toList();
 
     try {
-      await ApiService.confirmAttendance(widget.classId, todayStr, presentIds, absentIds);
+      await ApiService.confirmAttendance(widget.classId, dateWithTimeStr, presentIds, absentIds);
       if (mounted) {
         _showSuccessDialog();
       }
@@ -63,6 +70,45 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _downloadAndOpenExcel() async {
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (c) => const Center(child: CircularProgressIndicator(color: AttendLensTheme.accentCyan)),
+      );
+
+      final url = ApiService.getExcelReportUrl(widget.classId);
+      final response = await http.get(Uri.parse(url));
+
+      if (mounted) Navigator.pop(context); // close loader
+
+      if (response.statusCode == 200) {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/Attendance_Report_Class_${widget.classId}.xlsx');
+        await file.writeAsBytes(response.bodyBytes);
+
+        await Share.shareXFiles(
+          [XFile(file.path)],
+          text: 'AttendLens Attendance Report (${widget.className})',
+        );
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to download Excel sheet: ${response.statusCode}')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // close loader if open
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error downloading Excel: $e')),
+        );
+      }
     }
   }
 
@@ -94,7 +140,7 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
               label: const Text("📥 Download / Open Excel Report"),
               onPressed: () {
                 Navigator.pop(context); // Close dialog
-                Navigator.pop(context); // Return to dashboard
+                _downloadAndOpenExcel();
               },
             ),
           ),
@@ -155,13 +201,7 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
             // Tab bar or Header
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text("Roster Review (Tap to Override)", style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                  Text("AI Accuracy: 98.4%", style: GoogleFonts.outfit(color: AttendLensTheme.accentCyan, fontSize: 12, fontWeight: FontWeight.w600)),
-                ],
-              ),
+              child: Text("Roster Review (Tap to Override)", style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
             ),
 
             // Student Lists

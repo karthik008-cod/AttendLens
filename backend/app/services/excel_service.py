@@ -43,14 +43,15 @@ def generate_class_excel(db: Session, classroom_id: int) -> str:
     center_align = Alignment(horizontal="center", vertical="center")
     left_align = Alignment(horizontal="left", vertical="center")
 
-    # Title Block
-    ws.merge_cells("A1:D1")
+    # Headers (built first so we know the total column count)
+    headers = ["Student ID", "Roll No", "Student Name", "Total %"] + [ld.date_str for ld in lecture_dates]
+
+    # Title Block — merge spans ALL columns dynamically
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
     ws["A1"] = f"Classroom: {classroom.name} ({classroom.subject})"
     ws["A1"].font = Font(name="Segoe UI", size=14, bold=True, color="1F4E78")
     ws["A1"].alignment = left_align
 
-    # Headers
-    headers = ["Student ID", "Roll No", "Student Name", "Total %"] + [ld.date_str for ld in lecture_dates]
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=3, column=col_idx, value=header)
         cell.fill = header_fill
@@ -61,11 +62,23 @@ def generate_class_excel(db: Session, classroom_id: int) -> str:
     # Populate student rows
     total_lectures = len(lecture_dates)
     for row_idx, student in enumerate(students, start=4):
-        ws.cell(row=row_idx, column=1, value=student.id).alignment = center_align
-        ws.cell(row=row_idx, column=2, value=student.roll_number).alignment = center_align
-        ws.cell(row=row_idx, column=3, value=student.name).alignment = left_align
+        # Columns 1-3: ID, Roll No, Name
+        id_cell = ws.cell(row=row_idx, column=1, value=student.id)
+        id_cell.alignment = center_align
+        id_cell.font = normal_font
+        id_cell.border = thin_border
 
-        # Calculate attendance
+        roll_cell = ws.cell(row=row_idx, column=2, value=student.roll_number)
+        roll_cell.alignment = center_align
+        roll_cell.font = normal_font
+        roll_cell.border = thin_border
+
+        name_cell = ws.cell(row=row_idx, column=3, value=student.name)
+        name_cell.alignment = left_align
+        name_cell.font = bold_font
+        name_cell.border = thin_border
+
+        # Calculate attendance and fill date columns
         present_count = 0
         for col_offset, ld in enumerate(lecture_dates):
             status = status_map.get((student.id, ld.id), "-")
@@ -73,19 +86,19 @@ def generate_class_excel(db: Session, classroom_id: int) -> str:
                 present_count += 1
             cell = ws.cell(row=row_idx, column=5 + col_offset, value=status)
             cell.alignment = center_align
-            cell.font = normal_font
             cell.border = thin_border
             if status == "P":
                 cell.font = Font(name="Segoe UI", size=10, color="008000")
             elif status == "A":
                 cell.font = Font(name="Segoe UI", size=10, color="C00000", bold=True)
+            else:
+                cell.font = normal_font
 
-        # Total %
+        # Total % column (column 4)
         pct = round((present_count / total_lectures * 100), 1) if total_lectures > 0 else 0.0
         pct_cell = ws.cell(row=row_idx, column=4, value=f"{pct}%")
         pct_cell.alignment = center_align
         pct_cell.border = thin_border
-        
         if total_lectures > 0 and pct < 75.0:
             pct_cell.fill = alert_fill
             pct_cell.font = alert_font
@@ -93,14 +106,9 @@ def generate_class_excel(db: Session, classroom_id: int) -> str:
             pct_cell.fill = good_fill
             pct_cell.font = good_font
 
-        for c in range(1, len(headers) + 1):
-            ws.cell(row=row_idx, column=c).border = thin_border
-            if c <= 3:
-                ws.cell(row=row_idx, column=c).font = normal_font if c != 3 else bold_font
-
-    # Auto-fit columns
+    # Auto-fit columns (default=10 guards against empty columns)
     for col in ws.columns:
-        max_len = max(len(str(cell.value or '')) for cell in col)
+        max_len = max((len(str(cell.value or '')) for cell in col), default=10)
         col_letter = get_column_letter(col[0].column)
         ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 

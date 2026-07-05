@@ -91,7 +91,11 @@ class _ClassDashboardScreenState extends State<ClassDashboardScreen> {
             onPressed: () async {
               if (nameController.text.isNotEmpty) {
                 try {
-                  await ApiService.createClass(nameController.text, subjectController.text, _defaultTeacherId);
+                  await ApiService.createClass(
+                    name: nameController.text,
+                    subject: subjectController.text,
+                    teacherId: _defaultTeacherId,
+                  );
                   _loadClasses();
                 } catch (e) {
                   // Fallback local add for demo
