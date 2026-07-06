@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:mobile/services/api_service.dart';
 import 'package:mobile/theme/theme.dart';
+import 'package:mobile/screens/camera_capture_screen.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -162,6 +163,23 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text("Review & Finalize (${widget.className})"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: AttendLensTheme.accentCyan),
+            tooltip: 'Re-scan / Retry Video',
+            onPressed: () {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CameraCaptureScreen(
+                    classId: widget.classId,
+                    className: widget.className,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -251,22 +269,51 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
               ),
             ),
 
-            // Save Button
+            // Save Button & Retry Button
             Padding(
               padding: const EdgeInsets.all(20),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AttendLensTheme.primaryIndigo,
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    elevation: 8,
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AttendLensTheme.primaryIndigo,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        elevation: 8,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                      onPressed: _isSaving ? null : _saveAndGenerateExcel,
+                      child: _isSaving
+                          ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                          : Text("💾 Finalize & Update Excel Sheet", style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ),
                   ),
-                  onPressed: _isSaving ? null : _saveAndGenerateExcel,
-                  child: _isSaving
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : Text("💾 Finalize & Update Excel Sheet", style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold)),
-                ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AttendLensTheme.accentCyan, width: 1.5),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                      icon: const Icon(Icons.refresh, color: AttendLensTheme.accentCyan, size: 20),
+                      label: Text("🔄 Re-record / Retry Attendance Video", style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: AttendLensTheme.accentCyan)),
+                      onPressed: _isSaving ? null : () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => CameraCaptureScreen(
+                              classId: widget.classId,
+                              className: widget.className,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

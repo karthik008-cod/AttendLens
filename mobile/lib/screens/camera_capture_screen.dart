@@ -163,26 +163,52 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
             ),
           ),
 
-          // Center Panning Guide Box (AR feedback style)
+          // AR Face Tracking Bounding Boxes (Green, Yellow, Red overlays)
           if (!_isProcessing)
-            Center(
-              child: Container(
-                width: MediaQuery.of(context).size.width * 0.85,
-                height: MediaQuery.of(context).size.height * 0.4,
-                decoration: BoxDecoration(
-                  border: Border.all(color: _isRecording ? AttendLensTheme.statusAbsent : AttendLensTheme.accentCyan, width: 3),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Align(
-                  alignment: Alignment.topCenter,
+            Stack(
+              children: [
+                // Center Panning Guide Box
+                Center(
                   child: Container(
-                    margin: const EdgeInsets.only(top: 12),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(12)),
-                    child: Text(_isRecording ? "🔴 RECORDING CLASS ROOM" : "🟢 AI SCANNER READY", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                    width: MediaQuery.of(context).size.width * 0.88,
+                    height: MediaQuery.of(context).size.height * 0.45,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: _isRecording ? AttendLensTheme.statusAbsent.withOpacity(0.5) : AttendLensTheme.accentCyan.withOpacity(0.5), width: 2),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(color: Colors.black.withOpacity(0.7), borderRadius: BorderRadius.circular(12)),
+                        child: Text(_isRecording ? "🔴 RECORDING: SCANNING FACES IN REAL-TIME" : "🟢 AI SCANNER READY (PAN SLOWLY)", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                // Simulated AR Bounding Box 1 (Green - Recognized)
+                if (_isRecording)
+                  Positioned(
+                    left: 40,
+                    top: MediaQuery.of(context).size.height * 0.32,
+                    child: _buildArBoundingBox("Recognized ✅", Colors.green, "ID #04"),
+                  ),
+                // Simulated AR Bounding Box 2 (Yellow - Processing/Scanning)
+                if (_isRecording)
+                  Positioned(
+                    right: 45,
+                    top: MediaQuery.of(context).size.height * 0.38,
+                    child: _buildArBoundingBox("Scanning... ⚡", Colors.amber, "Face #12"),
+                  ),
+                // Simulated AR Bounding Box 3 (Red - New/Unrecognized)
+                if (_isRecording)
+                  Positioned(
+                    left: 110,
+                    bottom: MediaQuery.of(context).size.height * 0.28,
+                    child: _buildArBoundingBox("New Face ❓", Colors.redAccent, "Unverified"),
+                  ),
+              ],
             ),
 
           // Bottom Overlay: Status Message & Record Button
@@ -246,6 +272,50 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                   const SizedBox(height: 20),
                 ],
               ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildArBoundingBox(String status, Color color, String label) {
+    return Container(
+      width: 100,
+      height: 110,
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 2.5),
+        borderRadius: BorderRadius.circular(12),
+        color: color.withOpacity(0.08),
+      ),
+      child: Stack(
+        children: [
+          // Corner accents
+          Positioned(top: 0, left: 0, child: Container(width: 12, height: 12, decoration: BoxDecoration(border: Border(top: BorderSide(color: color, width: 4), left: BorderSide(color: color, width: 4))))),
+          Positioned(top: 0, right: 0, child: Container(width: 12, height: 12, decoration: BoxDecoration(border: Border(top: BorderSide(color: color, width: 4), right: BorderSide(color: color, width: 4))))),
+          Positioned(bottom: 0, left: 0, child: Container(width: 12, height: 12, decoration: BoxDecoration(border: Border(bottom: BorderSide(color: color, width: 4), left: BorderSide(color: color, width: 4))))),
+          Positioned(bottom: 0, right: 0, child: Container(width: 12, height: 12, decoration: BoxDecoration(border: Border(bottom: BorderSide(color: color, width: 4), right: BorderSide(color: color, width: 4))))),
+          // Badge
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
+              child: Text(
+                status,
+                style: GoogleFonts.outfit(color: color == Colors.amber ? Colors.black : Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.topCenter,
+            child: Container(
+              margin: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(4)),
+              child: Text(label, style: GoogleFonts.outfit(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w600)),
             ),
           ),
         ],
