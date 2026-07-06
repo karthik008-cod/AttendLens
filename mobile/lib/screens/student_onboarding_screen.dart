@@ -148,45 +148,75 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                   Text(errorMsg!, style: GoogleFonts.outfit(color: AttendLensTheme.statusAbsent, fontSize: 13)),
                 ],
 
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: allDone ? AttendLensTheme.primaryIndigo : Colors.grey.shade800,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: allDone ? AttendLensTheme.primaryIndigo : Colors.grey.shade800,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                        onPressed: (isUploading || !allDone) ? null : () async {
+                          if (nameCtrl.text.isEmpty || rollCtrl.text.isEmpty) {
+                            setModal(() => errorMsg = 'Please fill name and roll number');
+                            return;
+                          }
+                          setModal(() => isUploading = true);
+                          try {
+                            final validPhotos = photos.whereType<File>().toList();
+                            await ApiService.addStudentBatch(nameCtrl.text, rollCtrl.text, widget.classId, validPhotos);
+                            _loadStudents();
+                            setModal(() {
+                              isUploading = false;
+                              nameCtrl.clear();
+                              rollCtrl.clear();
+                              for (int i = 0; i < photos.length; i++) photos[i] = null;
+                            });
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('⚡ Student saved! Ready for next student.'), backgroundColor: Colors.green, duration: Duration(seconds: 2)),
+                              );
+                            }
+                          } catch (e) {
+                            setModal(() => isUploading = false);
+                          }
+                        },
+                        child: isUploading
+                            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                            : Text('Save & Add Next ⚡', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                      ),
                     ),
-                    onPressed: (isUploading) ? null : () async {
-                      if (nameCtrl.text.isEmpty || rollCtrl.text.isEmpty) {
-                        setModal(() => errorMsg = 'Please fill name and roll number');
-                        return;
-                      }
-                      if (!allDone) {
-                        setModal(() => errorMsg = 'Please capture all ${widget.requiredPhotos} photos');
-                        return;
-                      }
-                      setModal(() => isUploading = true);
-                      try {
-                        // Upload student with first photo
-                        final studentData = await ApiService.addStudent(nameCtrl.text, rollCtrl.text, widget.classId, photos[0]);
-                        final studentId = studentData['id'] as int;
-                        // Upload additional photos
-                        for (int i = 1; i < photos.length; i++) {
-                          if (photos[i] != null) await ApiService.addStudentPhoto(studentId, photos[i]!);
-                        }
-                        _loadStudents();
-                        if (mounted) Navigator.pop(ctx);
-                      } catch (e) {
-                        // Fallback: add locally for demo
-                        setState(() => _students.add({'id': _students.length + 1, 'name': nameCtrl.text, 'roll_number': rollCtrl.text, 'photo_count': capturedCount}));
-                        if (mounted) Navigator.pop(ctx);
-                      }
-                    },
-                    child: isUploading
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                        : Text(allDone ? 'Save & Enroll Student' : 'Capture all photos first', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold)),
-                  ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: allDone ? AttendLensTheme.accentCyan : Colors.grey.shade800, width: 1.5),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                        onPressed: (isUploading || !allDone) ? null : () async {
+                          if (nameCtrl.text.isEmpty || rollCtrl.text.isEmpty) {
+                            setModal(() => errorMsg = 'Please fill name and roll number');
+                            return;
+                          }
+                          setModal(() => isUploading = true);
+                          try {
+                            final validPhotos = photos.whereType<File>().toList();
+                            await ApiService.addStudentBatch(nameCtrl.text, rollCtrl.text, widget.classId, validPhotos);
+                            _loadStudents();
+                            if (mounted) Navigator.pop(ctx);
+                          } catch (e) {
+                            if (mounted) Navigator.pop(ctx);
+                          }
+                        },
+                        child: Text('Save & Close', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: allDone ? AttendLensTheme.accentCyan : Colors.grey)),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

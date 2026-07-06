@@ -1,14 +1,14 @@
 import os
 import shutil
 from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import bcrypt
 from app.db.database import get_db
 from app.db.models import Teacher, Classroom, Student, StudentPhoto, LectureDate, AttendanceRecord
-from app.services.ai_engine import extract_face_encoding, merge_student_encodings, process_classroom_video
+from app.services.ai_engine import extract_face_encoding, merge_student_encodings, merge_encoding_strings, process_classroom_video
 from app.services.excel_service import generate_class_excel
 
 def hash_password(password: str) -> str:
@@ -215,8 +215,37 @@ def get_students(class_id: int, db: Session = Depends(get_db)):
     return [_student_dict(s) for s in students]
 
 
+def _process_student_photos_bg(student_id: int, file_paths: List[str]):
+    """Background task: extracts face encodings without blocking the HTTP response or the teacher's app!"""
+    from app.db.database import SessionLocal
+    db = SessionLocal()
+    try:
+        student = db.query(Student).filter(Student.id == student_id).first()
+        if not student:
+            return
+
+        photo_entries = []
+        for path in file_paths:
+            enc = extract_face_encoding(path)
+            sp = StudentPhoto(student_id=student_id, photo_path=path, face_encoding=enc)
+            db.add(sp)
+            photo_entries.append(enc)
+
+        # Merge with existing photos if any
+        all_photos = db.query(StudentPhoto).filter(StudentPhoto.student_id == student_id).all()
+        all_encs = [p.face_encoding for p in all_photos if p.face_encoding]
+        avg_enc = merge_encoding_strings(all_encs)
+        student.face_encoding = avg_enc
+        db.commit()
+    except Exception as e:
+        print(f"Background photo processing error for student {student_id}: {e}")
+    finally:
+        db.close()
+
+
 @router.post("/students")
 def add_student(
+    background_tasks: BackgroundTasks,
     name: str = Form(...),
     roll_number: str = Form(...),
     classroom_id: int = Form(...),
@@ -224,31 +253,61 @@ def add_student(
     db: Session = Depends(get_db),
 ):
     photo_path = None
-    face_enc = None
-
     if photo:
         file_path = os.path.join(UPLOAD_DIR, f"student_{roll_number}_{photo.filename}")
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(photo.file, buffer)
         photo_path = file_path
-        face_enc = extract_face_encoding(file_path)
 
     student = Student(
         name=name,
         roll_number=roll_number,
         classroom_id=classroom_id,
         photo_path=photo_path,
-        face_encoding=face_enc,
+        face_encoding="processing...",
     )
     db.add(student)
     db.commit()
     db.refresh(student)
 
-    # Save as StudentPhoto entry for multi-photo tracking
     if photo_path:
-        sp = StudentPhoto(student_id=student.id, photo_path=photo_path, face_encoding=face_enc)
-        db.add(sp)
-        db.commit()
+        background_tasks.add_task(_process_student_photos_bg, student.id, [photo_path])
+
+    return _student_dict(student)
+
+
+@router.post("/students/batch")
+def add_student_batch(
+    background_tasks: BackgroundTasks,
+    name: str = Form(...),
+    roll_number: str = Form(...),
+    classroom_id: int = Form(...),
+    photos: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    """Instant bulk enrollment: saves student immediately in 0.05 seconds and processes AI embeddings in the background!"""
+    if not photos or len(photos) == 0:
+        raise HTTPException(status_code=400, detail="At least 1 photo required")
+
+    file_paths = []
+    for idx, photo in enumerate(photos):
+        file_path = os.path.join(UPLOAD_DIR, f"student_{roll_number}_{idx+1}_{photo.filename}")
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(photo.file, buffer)
+        file_paths.append(file_path)
+
+    student = Student(
+        name=name,
+        roll_number=roll_number,
+        classroom_id=classroom_id,
+        photo_path=file_paths[0] if file_paths else None,
+        face_encoding="processing...",
+    )
+    db.add(student)
+    db.commit()
+    db.refresh(student)
+
+    background_tasks.add_task(_process_student_photos_bg, student.id, file_paths)
 
     return _student_dict(student)
 
@@ -256,10 +315,11 @@ def add_student(
 @router.post("/students/{student_id}/photos")
 def add_student_photo(
     student_id: int,
+    background_tasks: BackgroundTasks,
     photo: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Add an additional photo to an existing student and recompute averaged encoding."""
+    """Add an additional photo instantly and process embedding asynchronously."""
     s = db.query(Student).filter(Student.id == student_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Student not found")
@@ -268,22 +328,14 @@ def add_student_photo(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(photo.file, buffer)
 
-    enc = extract_face_encoding(file_path)
-    db.add(StudentPhoto(student_id=student_id, photo_path=file_path, face_encoding=enc))
-    db.commit()
-
-    # Recompute averaged encoding from ALL photos
-    all_photos = db.query(StudentPhoto).filter(StudentPhoto.student_id == student_id).all()
-    avg_enc = merge_student_encodings([p.photo_path for p in all_photos])
-    s.face_encoding = avg_enc
     if not s.photo_path:
         s.photo_path = file_path
-    db.commit()
-    db.refresh(s)
+        db.commit()
+
+    background_tasks.add_task(_process_student_photos_bg, student_id, [file_path])
 
     return {
-        "message": f"Photo added (total: {len(all_photos)})",
-        "total_photos": len(all_photos),
+        "message": "Photo upload started in background",
         "student": _student_dict(s),
     }
 

@@ -7,6 +7,7 @@ import 'package:mobile/services/api_service.dart';
 import 'package:mobile/theme/theme.dart';
 import 'package:mobile/screens/home_dashboard_screen.dart';
 import 'package:mobile/screens/auth/signup_screen.dart';
+import 'package:mobile/widgets/server_settings_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -89,7 +90,17 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 40),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.settings_outlined, color: Colors.white70, size: 26),
+                        tooltip: 'Server Settings',
+                        onPressed: () => showServerSettingsDialog(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
 
                   // Logo
                   Center(

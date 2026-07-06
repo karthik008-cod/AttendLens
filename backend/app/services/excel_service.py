@@ -44,7 +44,7 @@ def generate_class_excel(db: Session, classroom_id: int) -> str:
     left_align = Alignment(horizontal="left", vertical="center")
 
     # Headers (built first so we know the total column count)
-    headers = ["Student ID", "Roll No", "Student Name", "Total %"] + [ld.date_str for ld in lecture_dates]
+    headers = ["Student ID / Roll No", "Student Name", "Total %"] + [ld.date_str for ld in lecture_dates]
 
     # Title Block — merge spans ALL columns dynamically
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
@@ -62,29 +62,25 @@ def generate_class_excel(db: Session, classroom_id: int) -> str:
     # Populate student rows
     total_lectures = len(lecture_dates)
     for row_idx, student in enumerate(students, start=4):
-        # Columns 1-3: ID, Roll No, Name
-        id_cell = ws.cell(row=row_idx, column=1, value=student.id)
-        id_cell.alignment = center_align
-        id_cell.font = normal_font
-        id_cell.border = thin_border
-
-        roll_cell = ws.cell(row=row_idx, column=2, value=student.roll_number)
+        # Column 1: Student ID / Roll Number as entered by the user
+        roll_cell = ws.cell(row=row_idx, column=1, value=student.roll_number)
         roll_cell.alignment = center_align
-        roll_cell.font = normal_font
+        roll_cell.font = bold_font
         roll_cell.border = thin_border
 
-        name_cell = ws.cell(row=row_idx, column=3, value=student.name)
+        # Column 2: Student Name
+        name_cell = ws.cell(row=row_idx, column=2, value=student.name)
         name_cell.alignment = left_align
         name_cell.font = bold_font
         name_cell.border = thin_border
 
-        # Calculate attendance and fill date columns
+        # Calculate attendance and fill date columns starting at column 4
         present_count = 0
         for col_offset, ld in enumerate(lecture_dates):
             status = status_map.get((student.id, ld.id), "-")
             if status == "P":
                 present_count += 1
-            cell = ws.cell(row=row_idx, column=5 + col_offset, value=status)
+            cell = ws.cell(row=row_idx, column=4 + col_offset, value=status)
             cell.alignment = center_align
             cell.border = thin_border
             if status == "P":
@@ -94,9 +90,9 @@ def generate_class_excel(db: Session, classroom_id: int) -> str:
             else:
                 cell.font = normal_font
 
-        # Total % column (column 4)
+        # Column 3: Total %
         pct = round((present_count / total_lectures * 100), 1) if total_lectures > 0 else 0.0
-        pct_cell = ws.cell(row=row_idx, column=4, value=f"{pct}%")
+        pct_cell = ws.cell(row=row_idx, column=3, value=f"{pct}%")
         pct_cell.alignment = center_align
         pct_cell.border = thin_border
         if total_lectures > 0 and pct < 75.0:

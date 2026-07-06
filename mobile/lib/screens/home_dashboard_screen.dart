@@ -12,6 +12,7 @@ import 'package:mobile/screens/student_onboarding_screen.dart';
 import 'package:mobile/screens/camera_capture_screen.dart';
 import 'package:mobile/screens/analytics_screen.dart';
 import 'package:mobile/screens/auth/login_screen.dart';
+import 'package:mobile/widgets/server_settings_dialog.dart';
 
 class HomeDashboardScreen extends StatefulWidget {
   const HomeDashboardScreen({super.key});
@@ -333,18 +334,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 
   void _showServerDialog() {
-    final ctrl = TextEditingController(text: ApiService.baseUrl);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AttendLensTheme.surfaceDark,
-        title: Text('Backend URL', style: GoogleFonts.outfit(color: Colors.white)),
-        content: TextField(controller: ctrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(hintText: 'http://192.168.X.X:8000/api')),
-        actions: [
-          ElevatedButton(onPressed: () { ApiService.setBaseUrl(ctrl.text); Navigator.pop(ctx); _loadClasses(); }, child: const Text('Save & Reconnect')),
-        ],
-      ),
-    );
+    showServerSettingsDialog(context, onSaved: _loadClasses);
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -396,13 +386,23 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                             Text(_greeting, style: GoogleFonts.outfit(fontSize: 14, color: AttendLensTheme.textSecondary)),
                             Text(_teacher.firstName, style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
                           ]),
-                          GestureDetector(
-                            onTap: _showProfileSheet,
-                            child: CircleAvatar(
-                              radius: 26,
-                              backgroundColor: AttendLensTheme.primaryIndigo.withOpacity(0.3),
-                              child: Text(_teacher.initials, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                            ),
+                          Row(
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.settings_outlined, color: Colors.white70, size: 26),
+                                tooltip: 'Server Settings',
+                                onPressed: _showServerDialog,
+                              ),
+                              const SizedBox(width: 8),
+                              GestureDetector(
+                                onTap: _showProfileSheet,
+                                child: CircleAvatar(
+                                  radius: 26,
+                                  backgroundColor: AttendLensTheme.primaryIndigo.withOpacity(0.3),
+                                  child: Text(_teacher.initials, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),

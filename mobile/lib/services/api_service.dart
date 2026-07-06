@@ -1,11 +1,30 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
   static String baseUrl = 'http://127.0.0.1:8000/api';
 
   static void setBaseUrl(String url) => baseUrl = url;
+
+  static Future<void> loadSavedBaseUrl() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('saved_base_url');
+      if (saved != null && saved.isNotEmpty) {
+        baseUrl = saved;
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> saveBaseUrl(String url) async {
+    baseUrl = url;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('saved_base_url', url);
+    } catch (_) {}
+  }
 
   // ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -143,6 +162,27 @@ class ApiService {
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) return json.decode(res.body);
     throw Exception('Failed to add student');
+  }
+
+  static Future<Map<String, dynamic>> addStudentBatch(
+    String name,
+    String rollNumber,
+    int classroomId,
+    List<File> photos,
+  ) async {
+    var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/students/batch'));
+    request.fields['name'] = name;
+    request.fields['roll_number'] = rollNumber;
+    request.fields['classroom_id'] = classroomId.toString();
+    for (final photo in photos) {
+      if (await photo.exists()) {
+        request.files.add(await http.MultipartFile.fromPath('photos', photo.path));
+      }
+    }
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to add student in batch: ${res.body}');
   }
 
   static Future<void> addStudentPhoto(int studentId, File photo) async {
