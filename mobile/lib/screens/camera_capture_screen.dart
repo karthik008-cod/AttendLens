@@ -272,6 +272,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                   const SizedBox(height: 20),
                 ],
               ),
+            ),
           ),
         ],
       ),
