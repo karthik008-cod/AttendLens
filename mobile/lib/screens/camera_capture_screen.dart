@@ -248,6 +248,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
               ),
             ),
           ),
+        ],
       ),
     );
   }
