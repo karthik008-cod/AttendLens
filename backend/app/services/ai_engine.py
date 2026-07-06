@@ -113,13 +113,13 @@ def process_classroom_video(video_path: str, student_encodings: dict) -> dict:
 
     # Detect what model to use based on existing student encoding dimensions (128 vs 512)
     target_model = "Facenet512"
-    threshold = 0.40  # Relaxed from 0.35 for far-away classroom videos with variable lighting
+    threshold = 0.62  # Relaxed to 0.62 to allow blurred, sideways, and far-away faces to be recognized
     for s_id, s_emb_str in student_encodings.items():
         try:
             s_emb = np.array(json.loads(s_emb_str))
             if len(s_emb) == 128:
                 target_model = "Facenet"
-                threshold = 0.45
+                threshold = 0.64
             break
         except Exception:
             pass
@@ -132,14 +132,15 @@ def process_classroom_video(video_path: str, student_encodings: dict) -> dict:
         except Exception:
             pass
 
-    # Sample every 15th frame (~2 fps at 30fps) for better coverage
+    # Adaptively divide the video length: sample ~20 evenly distributed frames across the entire duration
     cap = cv2.VideoCapture(video_path)
     frame_count = 0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    sample_interval = max(int(fps / 2), 1)  # ~2 frames per second dynamically
+    target_samples = 20
+    sample_interval = max(int(total_frames / target_samples), 1)
 
-    print(f"Video: {total_frames} frames at {fps:.0f} FPS, sampling every {sample_interval} frames")
+    print(f"Video: {total_frames} frames at {fps:.0f} FPS, adaptively dividing to sample every {sample_interval} frames (~{target_samples} total checks)")
 
     while cap.isOpened():
         ret, frame = cap.read()
