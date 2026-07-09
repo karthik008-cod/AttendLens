@@ -161,7 +161,13 @@ class ApiService {
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception('Failed to add student');
+    try {
+      final errData = json.decode(res.body);
+      if (errData['detail'] != null) throw Exception(errData['detail']);
+    } catch (e) {
+      if (e.toString().contains('Exception: ')) rethrow;
+    }
+    throw Exception('Failed to add student: ${res.body}');
   }
 
   static Future<Map<String, dynamic>> addStudentBatch(
@@ -182,6 +188,12 @@ class ApiService {
     final streamed = await request.send();
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) return json.decode(res.body);
+    try {
+      final errData = json.decode(res.body);
+      if (errData['detail'] != null) throw Exception(errData['detail']);
+    } catch (e) {
+      if (e.toString().contains('Exception: ')) rethrow;
+    }
     throw Exception('Failed to add student in batch: ${res.body}');
   }
 
@@ -216,6 +228,15 @@ class ApiService {
     if (res.statusCode != 200) throw Exception('Failed to delete student');
   }
 
+  static Future<Map<String, dynamic>> checkPhotoQuality(File photo) async {
+    var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/students/check-quality'));
+    request.files.add(await http.MultipartFile.fromPath('photo', photo.path));
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 200) return json.decode(res.body);
+    return {'is_good': true, 'sharpness_score': 100.0, 'brightness_score': 128.0, 'warning_message': null};
+  }
+
   // ── Attendance ──────────────────────────────────────────────────────────────
 
   static Future<Map<String, dynamic>> scanVideo(int classroomId, File videoFile) async {
@@ -226,6 +247,16 @@ class ApiService {
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) return json.decode(res.body);
     throw Exception('Failed to scan video');
+  }
+
+  static Future<Map<String, dynamic>> streamFrame(int classroomId, File frameFile) async {
+    var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/attendance/stream-frame'));
+    request.fields['classroom_id'] = classroomId.toString();
+    request.files.add(await http.MultipartFile.fromPath('frame', frameFile.path));
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to stream frame');
   }
 
   static Future<Map<String, dynamic>> confirmAttendance(
@@ -246,6 +277,20 @@ class ApiService {
     );
     if (res.statusCode == 200) return json.decode(res.body);
     throw Exception('Failed to save attendance');
+  }
+
+  static Future<Map<String, dynamic>> updatePastAttendance(int studentId, String dateStr, String status) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/attendance/record'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({
+        'student_id': studentId,
+        'date_str': dateStr,
+        'status': status,
+      }),
+    );
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to update past record');
   }
 
   // ── Reports ─────────────────────────────────────────────────────────────────

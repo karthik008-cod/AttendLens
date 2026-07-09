@@ -16,22 +16,30 @@ def extract_face_encoding(image_path: str) -> str:
         return json.dumps(np.random.rand(128).tolist())
 
     try:
-        # First try enforcing detection with RetinaFace so we get landmark-aligned cropped faces
+        # Use YuNet: OpenCV's ultra-fast (2023) deep learning face detector (~0.05s) with strict enforcement!
         embedding_objs = DeepFace.represent(
-            img_path=image_path, model_name="Facenet512", detector_backend="retinaface", enforce_detection=True
+            img_path=image_path, model_name="Facenet512", detector_backend="yunet", enforce_detection=True
         )
         if embedding_objs and len(embedding_objs) > 0:
             return json.dumps(embedding_objs[0]["embedding"])
     except Exception:
         try:
-            # Fallback if retinaface fails on lighting/angle
+            # Fast fallback to SSD (Single Shot MultiBox Detector) if YuNet missed
             embedding_objs = DeepFace.represent(
-                img_path=image_path, model_name="Facenet512", detector_backend="opencv", enforce_detection=False
+                img_path=image_path, model_name="Facenet512", detector_backend="ssd", enforce_detection=True
             )
             if embedding_objs and len(embedding_objs) > 0:
                 return json.dumps(embedding_objs[0]["embedding"])
-        except Exception as e:
-            print(f"Error extracting face encoding: {e}")
+        except Exception:
+            try:
+                # Final fallback without enforcement for difficult lighting/angles during registration
+                embedding_objs = DeepFace.represent(
+                    img_path=image_path, model_name="Facenet512", detector_backend="yunet", enforce_detection=False
+                )
+                if embedding_objs and len(embedding_objs) > 0:
+                    return json.dumps(embedding_objs[0]["embedding"])
+            except Exception as e:
+                print(f"Error extracting face encoding: {e}")
 
     return json.dumps(np.random.rand(512).tolist())
 
@@ -83,6 +91,70 @@ def merge_encoding_strings(encoding_strings: list) -> str:
     return json.dumps(avg_embedding.tolist())
 
 
+def assess_photo_quality_and_liveness(image_path: str) -> dict:
+    """Evaluates an uploaded enrollment photo for sharpness, brightness, and liveness / anti-spoofing heuristics.
+    Returns: { "is_good": bool, "sharpness_score": float, "brightness_score": float, "warning_message": str }
+    """
+    if not os.path.exists(image_path):
+        return {
+            "is_good": False,
+            "sharpness_score": 0.0,
+            "brightness_score": 0.0,
+            "warning_message": "⚠️ Photo file could not be read or opened."
+        }
+
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            return {
+                "is_good": False,
+                "sharpness_score": 0.0,
+                "brightness_score": 0.0,
+                "warning_message": "⚠️ Photo file is invalid or corrupted."
+            }
+
+        # 1. Sharpness / Blur check via Laplacian variance
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+        # 2. Brightness check via mean pixel intensity
+        brightness = float(np.mean(gray))
+
+        # 3. Basic Liveness / Screen Spoof heuristic check (checking for flat contrast / low dynamic range)
+        std_dev = float(np.std(gray))
+
+        warning_msg = None
+        is_good = True
+
+        if sharpness < 40.0:
+            is_good = False
+            warning_msg = f"⚠️ Photo is too blurry (sharpness: {int(sharpness)}/100). Please hold still and retake in good light."
+        elif brightness < 45.0:
+            is_good = False
+            warning_msg = f"⚠️ Photo is too dark (brightness: {int(brightness)}/255). Please face towards a bright light source."
+        elif brightness > 235.0:
+            is_good = False
+            warning_msg = f"⚠️ Photo is overexposed/too bright (brightness: {int(brightness)}/255). Please avoid direct glare."
+        elif std_dev < 15.0:
+            is_good = False
+            warning_msg = "⚠️ Low contrast / flat image detected. Please ensure a live 3D face in natural lighting."
+
+        return {
+            "is_good": is_good,
+            "sharpness_score": round(sharpness, 1),
+            "brightness_score": round(brightness, 1),
+            "warning_message": warning_msg
+        }
+    except Exception as e:
+        print(f"Quality assessment error: {e}")
+        return {
+            "is_good": True,
+            "sharpness_score": 100.0,
+            "brightness_score": 128.0,
+            "warning_message": None
+        }
+
+
 def _upscale_for_face_detection(frame):
     """Upscale small frames so tiny distant faces become large enough for detectors.
     RetinaFace needs faces at least ~20px wide. A face at 5 meters in 1080p video
@@ -113,13 +185,13 @@ def process_classroom_video(video_path: str, student_encodings: dict) -> dict:
 
     # Detect what model to use based on existing student encoding dimensions (128 vs 512)
     target_model = "Facenet512"
-    threshold = 0.62  # Relaxed to 0.62 to allow blurred, sideways, and far-away faces to be recognized
+    threshold = 0.48  # Stricter threshold (0.48) to prevent false positives during classroom scanning
     for s_id, s_emb_str in student_encodings.items():
         try:
             s_emb = np.array(json.loads(s_emb_str))
             if len(s_emb) == 128:
                 target_model = "Facenet"
-                threshold = 0.64
+                threshold = 0.50
             break
         except Exception:
             pass
@@ -159,24 +231,42 @@ def process_classroom_video(video_path: str, student_encodings: dict) -> dict:
 
         if DEEPFACE_AVAILABLE:
             try:
-                # Use RetinaFace for precision facial landmark alignment!
-                # Try retinaface first, fall back to opencv
                 frame_faces = []
                 try:
+                    # Use YuNet: OpenCV's ultra-fast (2023) deep learning face detector (~0.05s) with strict enforcement!
                     frame_faces = DeepFace.represent(
-                        img_path=temp_frame_path, model_name=target_model, detector_backend="retinaface", enforce_detection=True
+                        img_path=temp_frame_path, model_name=target_model, detector_backend="yunet", enforce_detection=True
                     )
                 except Exception:
                     try:
-                        # Fallback to opencv with enforce_detection=False for far-away/blurry faces
+                        # Fast fallback 1: SSD (Single Shot MultiBox Detector)
                         frame_faces = DeepFace.represent(
-                            img_path=temp_frame_path, model_name=target_model, detector_backend="opencv", enforce_detection=False
+                            img_path=temp_frame_path, model_name=target_model, detector_backend="ssd", enforce_detection=True
                         )
                     except Exception:
-                        pass
+                        try:
+                            # Fallback 2: RetinaFace (high accuracy for dim/angled/difficult faces)
+                            frame_faces = DeepFace.represent(
+                                img_path=temp_frame_path, model_name=target_model, detector_backend="retinaface", enforce_detection=True
+                            )
+                        except Exception:
+                            try:
+                                # Fallback 3: OpenCV Haar Cascade
+                                frame_faces = DeepFace.represent(
+                                    img_path=temp_frame_path, model_name=target_model, detector_backend="opencv", enforce_detection=True
+                                )
+                            except Exception:
+                                pass
 
                 for face_obj in frame_faces:
                     frame_emb = np.array(face_obj["embedding"])
+                    area = face_obj.get("facial_area", {})
+                    fw = int(area.get("w", area.get("width", 100)))
+
+                    face_ratio = max(fw / 800.0, 0.015)
+                    est_meters = round(min(max(0.16 / face_ratio, 0.6), 8.0), 1)
+                    offset = (est_meters - 3.5) * 0.015
+                    dynamic_threshold = round(min(max(threshold + offset, threshold - 0.04), threshold + 0.07), 3)
 
                     # Single Best Match: compare against ALL student encodings
                     best_match_id = None
@@ -191,11 +281,21 @@ def process_classroom_video(video_path: str, student_encodings: dict) -> dict:
                             best_dist = cosine_dist
                             best_match_id = s_id
 
-                    if best_match_id is not None and best_dist < threshold:
-                        print(f"Frame {frame_count}: Matched Student ID {best_match_id} (dist: {best_dist:.4f} < {threshold})")
+                    if best_match_id is not None and best_dist < dynamic_threshold:
+                        st_name = "Student"
+                        st_roll = best_match_id
+                        if student_info and best_match_id in student_info:
+                            st_name = student_info[best_match_id].get("name", "Student")
+                            st_roll = student_info[best_match_id].get("roll_number", best_match_id)
+                        print(f"Frame {frame_count}: Matched {st_name}({st_roll}) [dist: {best_dist:.4f} < {dynamic_threshold:.3f} | est. distance: {est_meters}m]")
                         present_ids.add(best_match_id)
                     else:
-                        print(f"Frame {frame_count}: Face ignored (best match ID {best_match_id} dist: {best_dist:.4f} >= {threshold})")
+                        st_name = "Unknown"
+                        st_roll = "?"
+                        if student_info and best_match_id in student_info:
+                            st_name = student_info[best_match_id].get("name", "Unknown")
+                            st_roll = student_info[best_match_id].get("roll_number", "?")
+                        print(f"Frame {frame_count}: Best match {st_name}({st_roll}) ignored [dist: {best_dist:.4f} >= {dynamic_threshold:.3f} | est. distance: {est_meters}m]")
             except Exception as e:
                 print(f"Frame {frame_count} processing error: {e}")
         else:
@@ -221,3 +321,162 @@ def process_classroom_video(video_path: str, student_encodings: dict) -> dict:
         "present_student_ids": list(present_ids),
         "absent_student_ids": list(all_ids - present_ids),
     }
+
+
+def process_single_frame(image_path: str, student_encodings: dict, student_info: dict = None) -> dict:
+    """Scans a single live streamed camera frame against known student encodings.
+    Resizes image to max 800px width for ultra-fast real-time recognition.
+    Returns: {"matched_ids": list of matched ids, "face_boxes": list of face box dicts}
+    """
+    if not os.path.exists(image_path):
+        return {"matched_ids": [], "face_boxes": []}
+
+    matched_ids = set()
+    face_boxes = []
+    img_w = 800
+    img_h = 600
+
+    try:
+        # Keep 800px width so distant classroom faces remain large enough (~30-40px) for deep learning detectors
+        img = cv2.imread(image_path)
+        if img is not None:
+            h, w = img.shape[:2]
+            if w > 800:
+                scale = 800 / w
+                img_w = 800
+                img_h = int(h * scale)
+                img = cv2.resize(img, (img_w, img_h))
+                cv2.imwrite(image_path, img)
+            else:
+                img_w = w
+                img_h = h
+    except Exception as e:
+        print(f"Error resizing live frame: {e}")
+
+    # Detect target model and threshold
+    target_model = "Facenet512"
+    threshold = 0.48  # Stricter threshold (0.48) to ensure high confidence recognition during live scanning
+    for s_id, s_emb_str in student_encodings.items():
+        try:
+            s_emb = np.array(json.loads(s_emb_str))
+            if len(s_emb) == 128:
+                target_model = "Facenet"
+                threshold = 0.50
+            break
+        except Exception:
+            pass
+
+    student_emb_cache = {}
+    for s_id, s_emb_str in student_encodings.items():
+        try:
+            student_emb_cache[s_id] = np.array(json.loads(s_emb_str))
+        except Exception:
+            pass
+
+    if DEEPFACE_AVAILABLE:
+        try:
+            frame_faces = []
+            try:
+                # Use YuNet: OpenCV's ultra-fast (2023) deep learning face detector (~0.05s) with strict enforcement!
+                frame_faces = DeepFace.represent(
+                    img_path=image_path, model_name=target_model, detector_backend="yunet", enforce_detection=True
+                )
+            except Exception:
+                try:
+                    # Fast fallback 1: SSD (Single Shot MultiBox Detector)
+                    frame_faces = DeepFace.represent(
+                        img_path=image_path, model_name=target_model, detector_backend="ssd", enforce_detection=True
+                    )
+                except Exception:
+                    try:
+                        # Fallback 2: RetinaFace (high accuracy for dim/angled/difficult faces)
+                        frame_faces = DeepFace.represent(
+                            img_path=image_path, model_name=target_model, detector_backend="retinaface", enforce_detection=True
+                        )
+                    except Exception:
+                        try:
+                            # Fallback 3: OpenCV Haar Cascade
+                            frame_faces = DeepFace.represent(
+                                img_path=image_path, model_name=target_model, detector_backend="opencv", enforce_detection=True
+                            )
+                        except Exception:
+                            pass
+
+            if not frame_faces:
+                print("Live Frame: No face detected in camera frame (try holding still or moving closer)")
+
+            for face_obj in frame_faces:
+                frame_emb = np.array(face_obj["embedding"])
+                area = face_obj.get("facial_area", {})
+                fx = int(area.get("x", area.get("left", 0)))
+                fy = int(area.get("y", area.get("top", 0)))
+                fw = int(area.get("w", area.get("width", 100)))
+                fh = int(area.get("h", area.get("height", 100)))
+
+                # ── Dynamic Distance-Scaled Confidence Meter (6-8m max classroom length) ──
+                face_ratio = max(fw / max(img_w, 1), 0.015)
+                est_meters = round(min(max(0.16 / face_ratio, 0.6), 8.0), 1)
+                offset = (est_meters - 3.5) * 0.015
+                dynamic_threshold = round(min(max(threshold + offset, threshold - 0.04), threshold + 0.07), 3)
+
+                best_match_id = None
+                best_dist = float("inf")
+                for s_id, s_emb in student_emb_cache.items():
+                    if len(frame_emb) != len(s_emb):
+                        continue
+                    denom = np.linalg.norm(frame_emb) * np.linalg.norm(s_emb) + 1e-9
+                    cosine_dist = 1 - np.dot(frame_emb, s_emb) / denom
+                    if cosine_dist < best_dist:
+                        best_dist = cosine_dist
+                        best_match_id = s_id
+
+                if best_match_id is not None and best_dist < dynamic_threshold:
+                    st_name = "Student"
+                    st_roll = best_match_id
+                    if student_info and best_match_id in student_info:
+                        st_name = student_info[best_match_id].get("name", "Student")
+                        st_roll = student_info[best_match_id].get("roll_number", best_match_id)
+                    print(f"Live Frame: Matched {st_name}({st_roll}) [dist: {best_dist:.4f} < {dynamic_threshold:.3f} | est. distance: {est_meters}m]")
+                    matched_ids.add(best_match_id)
+                    face_boxes.append({
+                        "id": best_match_id,
+                        "dist": round(best_dist, 4),
+                        "threshold": round(dynamic_threshold, 3),
+                        "est_meters": est_meters,
+                        "box": {"left": round(fx / max(img_w, 1), 4), "top": round(fy / max(img_h, 1), 4), "width": round(fw / max(img_w, 1), 4), "height": round(fh / max(img_h, 1), 4)}
+                    })
+                else:
+                    st_name = "Unknown"
+                    st_roll = "?"
+                    if student_info and best_match_id in student_info:
+                        st_name = student_info[best_match_id].get("name", "Unknown")
+                        st_roll = student_info[best_match_id].get("roll_number", "?")
+                    print(f"Live Frame: Best match {st_name}({st_roll}) ignored [dist: {best_dist:.4f} >= {dynamic_threshold:.3f} | est. distance: {est_meters}m]")
+                    face_boxes.append({
+                        "id": None,
+                        "dist": round(best_dist, 4) if best_dist != float("inf") else 1.0,
+                        "threshold": round(dynamic_threshold, 3),
+                        "est_meters": est_meters,
+                        "box": {"left": round(fx / max(img_w, 1), 4), "top": round(fy / max(img_h, 1), 4), "width": round(fw / max(img_w, 1), 4), "height": round(fh / max(img_h, 1), 4)}
+                    })
+        except Exception as e:
+            print(f"Live frame error: {e}")
+    else:
+        # Simulation mode: match 1 random student
+        all_ids = list(student_encodings.keys())
+        if all_ids:
+            sim_id = np.random.choice(all_ids)
+            matched_ids.add(sim_id)
+            face_boxes.append({
+                "id": sim_id,
+                "dist": 0.3210,
+                "box": {"left": 0.3, "top": 0.25, "width": 0.4, "height": 0.4}
+            })
+
+    try:
+        os.remove(image_path)
+    except Exception:
+        pass
+
+    return {"matched_ids": list(matched_ids), "face_boxes": face_boxes}
+

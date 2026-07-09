@@ -417,35 +417,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         _statCard('${_classes.length}', 'Classes', Icons.class_outlined),
                         const SizedBox(width: 12),
                         _statCard('$_totalStudents', 'Students', Icons.people_outline),
-                        const SizedBox(width: 12),
-                        _statCard('AI', 'Powered', Icons.face_retouching_natural),
                       ]),
                     ],
-                  ),
-                ),
-              ),
-
-              // ── Quick Take Attendance ─────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: AttendLensTheme.gradientButtonDecoration,
-                    child: Row(children: [
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('Ready for class?', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                        const SizedBox(height: 4),
-                        Text('Tap a class below to take attendance in seconds.', style: GoogleFonts.outfit(fontSize: 12, color: Colors.white70)),
-                      ])),
-                      const SizedBox(width: 12),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: AttendLensTheme.primaryIndigo, padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text('New Class'),
-                        onPressed: _showCreateClassDialog,
-                      ),
-                    ]),
                   ),
                 ),
               ),
@@ -453,12 +426,26 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               // ── Section Header ────────────────────────────────────────────
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text('My Classrooms', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                      IconButton(icon: const Icon(Icons.refresh, color: Colors.grey, size: 22), onPressed: _loadClasses),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.add_circle, color: AttendLensTheme.accentCyan, size: 26),
+                            tooltip: 'Create New Class',
+                            onPressed: _showCreateClassDialog,
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            icon: const Icon(Icons.refresh, color: Colors.grey, size: 22),
+                            tooltip: 'Refresh Classes',
+                            onPressed: _loadClasses,
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -475,7 +462,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       const SizedBox(height: 16),
                       Text('No classes yet', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
                       const SizedBox(height: 6),
-                      Text('Tap "New Class" to get started', style: GoogleFonts.outfit(fontSize: 14, color: AttendLensTheme.textSecondary)),
+                      Text('Tap "+" to get started', style: GoogleFonts.outfit(fontSize: 14, color: AttendLensTheme.textSecondary)),
                     ]),
                   ),
                 )

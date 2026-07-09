@@ -138,7 +138,7 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: AttendLensTheme.statusPresent, padding: const EdgeInsets.symmetric(vertical: 14)),
               icon: const Icon(Icons.table_chart, color: Colors.white),
-              label: const Text("📥 Download / Open Excel Report"),
+              label: Text("Open / Download Excel Report", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15), maxLines: 1, overflow: TextOverflow.ellipsis),
               onPressed: () {
                 Navigator.pop(context); // Close dialog
                 _downloadAndOpenExcel();
@@ -216,10 +216,44 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
               ),
             ),
 
-            // Tab bar or Header
+            // Header & Batch Toggles
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Text("Roster Review (Tap to Override)", style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text("Roster Review (Swipe/Tap)", style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white), overflow: TextOverflow.ellipsis),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton.icon(
+                        style: TextButton.styleFrom(foregroundColor: AttendLensTheme.statusPresent, padding: const EdgeInsets.symmetric(horizontal: 4)),
+                        icon: const Icon(Icons.done_all, size: 15),
+                        label: Text("All Present", style: GoogleFonts.outfit(fontSize: 11, fontWeight: FontWeight.bold)),
+                        onPressed: () {
+                          setState(() {
+                            _present.addAll(_absent);
+                            _absent.clear();
+                          });
+                        },
+                      ),
+                      TextButton.icon(
+                        style: TextButton.styleFrom(foregroundColor: AttendLensTheme.statusAbsent, padding: const EdgeInsets.symmetric(horizontal: 4)),
+                        icon: const Icon(Icons.remove_done, size: 15),
+                        label: Text("All Absent", style: GoogleFonts.outfit(fontSize: 11, fontWeight: FontWeight.bold)),
+                        onPressed: () {
+                          setState(() {
+                            _absent.addAll(_present);
+                            _present.clear();
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
 
             // Student Lists
@@ -228,39 +262,77 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 children: [
                   if (_absent.isNotEmpty) ...[
-                    Text("❌ Marked Absent (Glance & check if missed)", style: GoogleFonts.outfit(color: AttendLensTheme.statusAbsent, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text("❌ Marked Absent (Swipe right or tap to mark Present)", style: GoogleFonts.outfit(color: AttendLensTheme.statusAbsent, fontWeight: FontWeight.bold, fontSize: 13)),
                     const SizedBox(height: 8),
-                    ..._absent.map((st) => Card(
-                          color: AttendLensTheme.statusAbsent.withOpacity(0.15),
-                          margin: const EdgeInsets.only(bottom: 10),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: AttendLensTheme.statusAbsent.withOpacity(0.4))),
-                          child: ListTile(
-                            leading: CircleAvatar(backgroundColor: AttendLensTheme.statusAbsent, child: const Icon(Icons.close, color: Colors.white, size: 20)),
-                            title: Text(st["name"], style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
-                            subtitle: Text("Roll No: ${st["roll_number"]}", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary)),
-                            trailing: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(backgroundColor: AttendLensTheme.statusPresent, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-                              icon: const Icon(Icons.check, size: 16),
-                              label: const Text("Mark Present"),
-                              onPressed: () => _toggleStatus(st, false),
+                    ..._absent.map((st) => Dismissible(
+                          key: ValueKey('absent_${st["id"]}'),
+                          direction: DismissDirection.horizontal,
+                          background: Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            alignment: Alignment.centerLeft,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            decoration: BoxDecoration(color: AttendLensTheme.statusPresent, borderRadius: BorderRadius.circular(16)),
+                            child: Row(children: [const Icon(Icons.check_circle, color: Colors.white), const SizedBox(width: 8), Text("Mark Present", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold))]),
+                          ),
+                          secondaryBackground: Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            decoration: BoxDecoration(color: AttendLensTheme.statusPresent, borderRadius: BorderRadius.circular(16)),
+                            child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text("Mark Present", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)), const SizedBox(width: 8), const Icon(Icons.check_circle, color: Colors.white)]),
+                          ),
+                          onDismissed: (_) => _toggleStatus(st, false),
+                          child: Card(
+                            color: AttendLensTheme.statusAbsent.withOpacity(0.15),
+                            margin: const EdgeInsets.only(bottom: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: AttendLensTheme.statusAbsent.withOpacity(0.4))),
+                            child: ListTile(
+                              leading: const CircleAvatar(backgroundColor: AttendLensTheme.statusAbsent, child: Icon(Icons.close, color: Colors.white, size: 20)),
+                              title: Text(st["name"], style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+                              subtitle: Text("Roll No: ${st["roll_number"]}", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary)),
+                              trailing: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(backgroundColor: AttendLensTheme.statusPresent, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                                icon: const Icon(Icons.check, size: 16),
+                                label: const Text("Mark Present"),
+                                onPressed: () => _toggleStatus(st, false),
+                              ),
                             ),
                           ),
                         )),
                     const SizedBox(height: 16),
                   ],
                   if (_present.isNotEmpty) ...[
-                    Text("✅ Marked Present", style: GoogleFonts.outfit(color: AttendLensTheme.statusPresent, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text("✅ Marked Present (Swipe left or tap to mark Absent)", style: GoogleFonts.outfit(color: AttendLensTheme.statusPresent, fontWeight: FontWeight.bold, fontSize: 13)),
                     const SizedBox(height: 8),
-                    ..._present.map((st) => Card(
-                          color: AttendLensTheme.surfaceDark,
-                          margin: const EdgeInsets.only(bottom: 10),
-                          child: ListTile(
-                            leading: CircleAvatar(backgroundColor: AttendLensTheme.statusPresent.withOpacity(0.2), child: const Icon(Icons.check, color: AttendLensTheme.statusPresent, size: 20)),
-                            title: Text(st["name"], style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
-                            subtitle: Text("Roll No: ${st["roll_number"]}", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary)),
-                            trailing: TextButton(
-                              onPressed: () => _toggleStatus(st, true),
-                              child: const Text("Mark Absent", style: TextStyle(color: AttendLensTheme.statusAbsent)),
+                    ..._present.map((st) => Dismissible(
+                          key: ValueKey('present_${st["id"]}'),
+                          direction: DismissDirection.horizontal,
+                          background: Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            alignment: Alignment.centerLeft,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            decoration: BoxDecoration(color: AttendLensTheme.statusAbsent, borderRadius: BorderRadius.circular(16)),
+                            child: Row(children: [const Icon(Icons.cancel, color: Colors.white), const SizedBox(width: 8), Text("Mark Absent", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold))]),
+                          ),
+                          secondaryBackground: Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            decoration: BoxDecoration(color: AttendLensTheme.statusAbsent, borderRadius: BorderRadius.circular(16)),
+                            child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text("Mark Absent", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)), const SizedBox(width: 8), const Icon(Icons.cancel, color: Colors.white)]),
+                          ),
+                          onDismissed: (_) => _toggleStatus(st, true),
+                          child: Card(
+                            color: AttendLensTheme.surfaceDark,
+                            margin: const EdgeInsets.only(bottom: 10),
+                            child: ListTile(
+                              leading: CircleAvatar(backgroundColor: AttendLensTheme.statusPresent.withOpacity(0.2), child: const Icon(Icons.check, color: AttendLensTheme.statusPresent, size: 20)),
+                              title: Text(st["name"], style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
+                              subtitle: Text("Roll No: ${st["roll_number"]}", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary)),
+                              trailing: TextButton(
+                                onPressed: () => _toggleStatus(st, true),
+                                child: const Text("Mark Absent", style: TextStyle(color: AttendLensTheme.statusAbsent)),
+                              ),
                             ),
                           ),
                         )),
@@ -286,7 +358,11 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
                       onPressed: _isSaving ? null : _saveAndGenerateExcel,
                       child: _isSaving
                           ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                          : Text("💾 Finalize & Update Excel Sheet", style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white)),
+                          : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                              const Icon(Icons.save_rounded, color: Colors.white, size: 20),
+                              const SizedBox(width: 8),
+                              Text("Finalize & Update Excel", style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                            ]),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -299,7 +375,7 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                       icon: const Icon(Icons.refresh, color: AttendLensTheme.accentCyan, size: 20),
-                      label: Text("🔄 Re-record / Retry Attendance Video", style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: AttendLensTheme.accentCyan)),
+                      label: Text("Re-record / Retry Video", style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: AttendLensTheme.accentCyan)),
                       onPressed: _isSaving ? null : () {
                         Navigator.pushReplacement(
                           context,

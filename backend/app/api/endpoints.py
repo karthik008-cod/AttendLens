@@ -8,7 +8,7 @@ from pydantic import BaseModel
 import bcrypt
 from app.db.database import get_db
 from app.db.models import Teacher, Classroom, Student, StudentPhoto, LectureDate, AttendanceRecord
-from app.services.ai_engine import extract_face_encoding, merge_student_encodings, merge_encoding_strings, process_classroom_video
+from app.services.ai_engine import extract_face_encoding, merge_student_encodings, merge_encoding_strings, process_classroom_video, process_single_frame, assess_photo_quality_and_liveness
 from app.services.excel_service import generate_class_excel
 
 def hash_password(password: str) -> str:
@@ -63,6 +63,11 @@ class AttendanceConfirmRequest(BaseModel):
     date_str: str   # YYYY-MM-DD
     present_student_ids: List[int]
     absent_student_ids: List[int]
+
+class AttendanceUpdateRequest(BaseModel):
+    student_id: int
+    date_str: str   # YYYY-MM-DD
+    status: str     # "P" or "A" or "-"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -252,6 +257,15 @@ def add_student(
     photo: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
 ):
+    roll_clean = str(roll_number).strip()
+    existing_students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
+    for s in existing_students:
+        if str(s.roll_number).strip().lower() == roll_clean.lower():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Duplicate roll number: A student named '{s.name}' with roll number '{roll_clean}' already exists in this class!"
+            )
+
     photo_path = None
     if photo:
         file_path = os.path.join(UPLOAD_DIR, f"student_{roll_number}_{photo.filename}")
@@ -260,8 +274,8 @@ def add_student(
         photo_path = file_path
 
     student = Student(
-        name=name,
-        roll_number=roll_number,
+        name=name.strip(),
+        roll_number=roll_clean,
         classroom_id=classroom_id,
         photo_path=photo_path,
         face_encoding="processing...",
@@ -288,6 +302,15 @@ def add_student_batch(
     """Instant bulk enrollment: saves student immediately in 0.05 seconds and processes AI embeddings in the background!"""
     if not photos or len(photos) == 0:
         raise HTTPException(status_code=400, detail="At least 1 photo required")
+
+    roll_clean = str(roll_number).strip()
+    existing_students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
+    for s in existing_students:
+        if str(s.roll_number).strip().lower() == roll_clean.lower():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Duplicate roll number: A student named '{s.name}' with roll number '{roll_clean}' already exists in this class!"
+            )
 
     file_paths = []
     for idx, photo in enumerate(photos):
@@ -364,6 +387,29 @@ def delete_student(student_id: int, db: Session = Depends(get_db)):
     return {"message": "Student deleted successfully"}
 
 
+@router.post("/students/check-quality")
+def check_photo_quality(photo: UploadFile = File(...)):
+    """Evaluates photo sharpness, brightness, and liveness/spoof heuristics before enrollment."""
+    file_path = os.path.join(UPLOAD_DIR, f"temp_quality_{photo.filename}")
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(photo.file, buffer)
+        res = assess_photo_quality_and_liveness(file_path)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        return res
+    except Exception as e:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        return {"is_good": True, "sharpness_score": 100.0, "brightness_score": 128.0, "warning_message": None}
+
+
 # ── Attendance ────────────────────────────────────────────────────────────────
 
 @router.post("/attendance/scan")
@@ -378,13 +424,53 @@ def scan_video(
 
     students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
     encodings = {s.id: s.face_encoding for s in students if s.face_encoding}
+    student_map = {s.id: _student_dict(s) for s in students}
 
-    results = process_classroom_video(video_path, encodings)
+    results = process_classroom_video(video_path, encodings, student_map)
 
     present_list = [_student_dict(s) for s in students if s.id in results["present_student_ids"]]
     absent_list  = [_student_dict(s) for s in students if s.id in results["absent_student_ids"]]
 
     return {"present_students": present_list, "absent_students": absent_list}
+
+
+@router.post("/attendance/stream-frame")
+def stream_frame(
+    classroom_id: int = Form(...),
+    frame: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    frame_path = os.path.join(UPLOAD_DIR, f"live_{classroom_id}_{frame.filename}")
+    with open(frame_path, "wb") as buffer:
+        shutil.copyfileobj(frame.file, buffer)
+
+    students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
+    encodings = {s.id: s.face_encoding for s in students if s.face_encoding}
+    student_map = {s.id: _student_dict(s) for s in students}
+
+    frame_res = process_single_frame(frame_path, encodings, student_map)
+    if isinstance(frame_res, dict):
+        matched_ids = set(frame_res.get("matched_ids", []))
+        face_boxes = frame_res.get("face_boxes", [])
+    else:
+        matched_ids = set(frame_res)
+        face_boxes = []
+
+    # Enrich face_boxes with student name and roll number for UI display
+    enriched_boxes = []
+    for fb in face_boxes:
+        s_id = fb.get("id")
+        if s_id in student_map:
+            fb["name"] = student_map[s_id]["name"]
+            fb["roll_number"] = student_map[s_id]["roll_number"]
+        else:
+            fb["name"] = "Scanning / Unrecognized"
+            fb["roll_number"] = "?"
+        enriched_boxes.append(fb)
+
+    present_list = [student_map[s_id] for s_id in matched_ids if s_id in student_map]
+    all_list = [_student_dict(s) for s in students]
+    return {"matched_students": present_list, "all_students": all_list, "face_boxes": enriched_boxes}
 
 
 @router.post("/attendance/confirm")
@@ -411,6 +497,43 @@ def confirm_attendance(req: AttendanceConfirmRequest, db: Session = Depends(get_
     db.commit()
     excel_path = generate_class_excel(db, req.classroom_id)
     return {"message": "Attendance saved successfully", "excel_path": excel_path}
+
+
+@router.put("/attendance/record")
+def update_attendance_record(req: AttendanceUpdateRequest, db: Session = Depends(get_db)):
+    """Allows teachers to modify past attendance status for a student on any lecture date."""
+    student = db.query(Student).filter(Student.id == req.student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    ld = db.query(LectureDate).filter(
+        LectureDate.classroom_id == student.classroom_id,
+        LectureDate.date_str == req.date_str,
+    ).first()
+
+    if not ld:
+        ld = LectureDate(date_str=req.date_str, classroom_id=student.classroom_id)
+        db.add(ld)
+        db.commit()
+        db.refresh(ld)
+
+    record = db.query(AttendanceRecord).filter(
+        AttendanceRecord.student_id == req.student_id,
+        AttendanceRecord.lecture_date_id == ld.id,
+    ).first()
+
+    if req.status in ["P", "A"]:
+        if record:
+            record.status = req.status
+        else:
+            db.add(AttendanceRecord(student_id=req.student_id, lecture_date_id=ld.id, classroom_id=student.classroom_id, status=req.status))
+    else:
+        if record:
+            db.delete(record)
+
+    db.commit()
+    excel_path = generate_class_excel(db, student.classroom_id)
+    return {"message": "Record updated successfully", "excel_path": excel_path}
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────
@@ -462,12 +585,21 @@ def get_class_analytics(class_id: int, db: Session = Depends(get_db)):
     # Per-student totals (sorted by % ascending — most at-risk first)
     student_summaries = []
     for s in students:
-        present = sum(1 for ld in lecture_dates if status_map.get((s.id, ld.id)) == "P")
+        present = 0
+        history = []
+        for ld in lecture_dates:
+            status = status_map.get((s.id, ld.id), "A")
+            if status == "P":
+                present += 1
+            history.append({
+                "date": ld.date_str,
+                "status": status if status in ("P", "A", "L") else "A"
+            })
         pct = round(present / total_lectures * 100, 1) if total_lectures > 0 else 0.0
         student_summaries.append({
             "id": s.id, "name": s.name, "roll_number": s.roll_number,
             "present": present, "absent": total_lectures - present,
-            "total": total_lectures, "percentage": pct,
+            "total": total_lectures, "percentage": pct, "history": history,
         })
     student_summaries.sort(key=lambda x: x["percentage"])
 

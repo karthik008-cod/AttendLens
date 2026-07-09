@@ -43,3 +43,6 @@ reports/*.xlsx
 # Backend Uploads & Reports
 backend/uploads/
 backend/reports/*.xlsx
+node_modules/
+backend/node_modules/
+backend/*.jpg

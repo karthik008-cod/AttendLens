@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:mobile/services/api_service.dart';
 import 'package:mobile/theme/theme.dart';
 
@@ -113,7 +114,30 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                       return GestureDetector(
                         onTap: () async {
                           final picked = await _picker.pickImage(source: ImageSource.camera, preferredCameraDevice: CameraDevice.front, imageQuality: 85);
-                          if (picked != null) setModal(() => photos[i] = File(picked.path));
+                          if (picked != null) {
+                            final file = File(picked.path);
+                            setModal(() {
+                              photos[i] = file;
+                              errorMsg = '⚡ Analyzing photo quality & lighting...';
+                            });
+                            try {
+                              final qRes = await ApiService.checkPhotoQuality(file);
+                              setModal(() {
+                                if (qRes['is_good'] == false && qRes['warning_message'] != null) {
+                                  errorMsg = qRes['warning_message'].toString();
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text(qRes['warning_message'].toString()), backgroundColor: Colors.orange.shade800, duration: const Duration(seconds: 4)),
+                                    );
+                                  }
+                                } else {
+                                  errorMsg = null;
+                                }
+                              });
+                            } catch (_) {
+                              setModal(() => errorMsg = null);
+                            }
+                          }
                         },
                         child: Container(
                           width: 80, height: 80,
@@ -164,6 +188,10 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                             setModal(() => errorMsg = 'Please fill name and roll number');
                             return;
                           }
+                          if (_students.any((s) => s['roll_number'].toString().trim().toLowerCase() == rollCtrl.text.trim().toLowerCase())) {
+                            setModal(() => errorMsg = 'Duplicate Roll No: Student with roll number "${rollCtrl.text.trim()}" already exists in this class!');
+                            return;
+                          }
                           setModal(() => isUploading = true);
                           try {
                             final validPhotos = photos.whereType<File>().toList();
@@ -181,7 +209,10 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                               );
                             }
                           } catch (e) {
-                            setModal(() => isUploading = false);
+                            setModal(() {
+                              isUploading = false;
+                              errorMsg = e.toString().replaceAll('Exception: ', '');
+                            });
                           }
                         },
                         child: isUploading
@@ -203,6 +234,10 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                             setModal(() => errorMsg = 'Please fill name and roll number');
                             return;
                           }
+                          if (_students.any((s) => s['roll_number'].toString().trim().toLowerCase() == rollCtrl.text.trim().toLowerCase())) {
+                            setModal(() => errorMsg = 'Duplicate Roll No: Student with roll number "${rollCtrl.text.trim()}" already exists in this class!');
+                            return;
+                          }
                           setModal(() => isUploading = true);
                           try {
                             final validPhotos = photos.whereType<File>().toList();
@@ -210,7 +245,10 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                             _loadStudents();
                             if (mounted) Navigator.pop(ctx);
                           } catch (e) {
-                            if (mounted) Navigator.pop(ctx);
+                            setModal(() {
+                              isUploading = false;
+                              errorMsg = e.toString().replaceAll('Exception: ', '');
+                            });
                           }
                         },
                         child: Text('Save & Close', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: allDone ? AttendLensTheme.accentCyan : Colors.grey)),
@@ -327,40 +365,118 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
 
   void _showInviteDialog() {
     final inviteUrl = ApiService.getInviteUrl(widget.classId);
+
+    void executeAction({required bool openOrShareAction}) async {
+      Navigator.pop(context); // Close dialog first so root Scaffold and screen are clean & responsive
+      await Clipboard.setData(ClipboardData(text: inviteUrl));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              openOrShareAction ? '🚀 Link Copied! Launching Portal...' : '✅ Invite URL Copied to Clipboard!',
+              style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            backgroundColor: openOrShareAction ? AttendLensTheme.primaryIndigo : Colors.green.shade700,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+
+      if (openOrShareAction) {
+        try {
+          if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+            if (Platform.isWindows) {
+              Process.run('cmd', ['/c', 'start', inviteUrl]);
+            } else if (Platform.isMacOS) {
+              Process.run('open', [inviteUrl]);
+            } else {
+              Process.run('xdg-open', [inviteUrl]);
+            }
+          } else {
+            await Share.share(
+              '🚀 Student Self-Registration Portal for ${widget.className}:\n\n$inviteUrl\n\nScan the QR code or click the link above to upload your enrollment photos easily from any device!',
+              subject: 'Self-Register for ${widget.className}',
+            );
+          }
+        } catch (e) {
+          debugPrint('Open/Share error: $e');
+        }
+      }
+    }
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AttendLensTheme.surfaceDark,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Text('🔗 Student Self-Registration', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Share this QR or link so students can register their own face photos from any device.', style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 13), textAlign: TextAlign.center),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
-              child: QrImageView(data: inviteUrl, version: QrVersions.auto, size: 160),
+        content: SizedBox(
+          width: 330,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Students can scan this QR code or click below to upload their face photos from any device.', style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 13), textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: () => executeAction(openOrShareAction: true),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AttendLensTheme.accentCyan, width: 2.5)),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 150,
+                          height: 150,
+                          child: QrImageView(data: inviteUrl, version: QrVersions.auto, size: 150),
+                        ),
+                        const SizedBox(height: 8),
+                        Text('👆 Tap QR to Open & Copy', style: GoogleFonts.outfit(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: AttendLensTheme.statusPresent, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                    icon: Icon(Platform.isWindows || Platform.isMacOS || Platform.isLinux ? Icons.open_in_browser_rounded : Icons.share_rounded, size: 18, color: Colors.white),
+                    label: Text(Platform.isWindows || Platform.isMacOS || Platform.isLinux ? 'Open Portal in Browser' : 'Share Registration Link', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
+                    onPressed: () => executeAction(openOrShareAction: true),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: AttendLensTheme.primaryIndigo, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                    icon: const Icon(Icons.copy_rounded, size: 18, color: Colors.white),
+                    label: Text('Copy Invite URL', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
+                    onPressed: () => executeAction(openOrShareAction: false),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onTap: () => executeAction(openOrShareAction: false),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(color: AttendLensTheme.backgroundDark, borderRadius: BorderRadius.circular(10), border: Border.all(color: AttendLensTheme.primaryIndigo.withOpacity(0.5))),
+                    child: Row(children: [
+                      Expanded(child: Text(inviteUrl, style: GoogleFonts.outfit(color: AttendLensTheme.accentCyan, fontSize: 12), overflow: TextOverflow.ellipsis)),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.copy, color: Colors.grey, size: 16),
+                    ]),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            GestureDetector(
-              onTap: () { Clipboard.setData(ClipboardData(text: inviteUrl)); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied!'))); },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(color: AttendLensTheme.backgroundDark, borderRadius: BorderRadius.circular(10), border: Border.all(color: AttendLensTheme.primaryIndigo.withOpacity(0.5))),
-                child: Row(children: [
-                  Expanded(child: Text(inviteUrl, style: GoogleFonts.outfit(color: AttendLensTheme.accentCyan, fontSize: 11), overflow: TextOverflow.ellipsis)),
-                  const SizedBox(width: 8),
-                  const Icon(Icons.copy, color: Colors.grey, size: 16),
-                ]),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text('Tap URL to copy', style: GoogleFonts.outfit(fontSize: 11, color: Colors.grey)),
-          ],
+          ),
         ),
-        actions: [ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done'))],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Close', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)))],
       ),
     );
   }

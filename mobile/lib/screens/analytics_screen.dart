@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:mobile/services/api_service.dart';
 import 'package:mobile/theme/theme.dart';
+import 'package:share_plus/share_plus.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   final int classId;
@@ -20,6 +21,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
   bool _isLoading = true;
   String? _error;
   String _searchQuery = '';
+  String _sortBy = 'Default';
+  String _filterBy = 'All';
 
   @override
   void initState() {
@@ -215,13 +218,93 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
 
   // ── Students Tab ───────────────────────────────────────────────────────────
 
+  void _showSortOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AttendLensTheme.surfaceDark,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Sort Students By', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+            const SizedBox(height: 16),
+            ...['Default', 'Name (A-Z)', 'Attendance: High to Low', 'Attendance: Low to High'].map((opt) {
+              final sel = _sortBy == opt;
+              return ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                tileColor: sel ? AttendLensTheme.primaryIndigo.withOpacity(0.2) : null,
+                leading: Icon(sel ? Icons.check_circle : Icons.circle_outlined, color: sel ? AttendLensTheme.accentCyan : Colors.white38),
+                title: Text(opt, style: GoogleFonts.outfit(color: sel ? Colors.white : Colors.white70, fontWeight: sel ? FontWeight.bold : FontWeight.normal)),
+                onTap: () {
+                  setState(() => _sortBy = opt);
+                  Navigator.pop(ctx);
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFilterOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AttendLensTheme.surfaceDark,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Filter Students', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+            const SizedBox(height: 16),
+            ...['All', 'Below 75% (Shortage)', 'Above 75% (Safe)', '100% Perfect'].map((opt) {
+              final sel = _filterBy == opt;
+              return ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                tileColor: sel ? AttendLensTheme.primaryIndigo.withOpacity(0.2) : null,
+                leading: Icon(sel ? Icons.check_circle : Icons.circle_outlined, color: sel ? AttendLensTheme.accentCyan : Colors.white38),
+                title: Text(opt, style: GoogleFonts.outfit(color: sel ? Colors.white : Colors.white70, fontWeight: sel ? FontWeight.bold : FontWeight.normal)),
+                onTap: () {
+                  setState(() => _filterBy = opt);
+                  Navigator.pop(ctx);
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildStudentsTab() {
     final allStudents = List<Map<String, dynamic>>.from(_data!['student_summaries'] ?? []);
-    final filtered = _searchQuery.isEmpty
-        ? allStudents
-        : allStudents.where((s) =>
-            s['name'].toString().toLowerCase().contains(_searchQuery.toLowerCase()) ||
-            s['roll_number'].toString().toLowerCase().contains(_searchQuery.toLowerCase())).toList();
+    List<Map<String, dynamic>> filtered = allStudents.where((s) {
+      if (_searchQuery.isNotEmpty) {
+        final q = _searchQuery.toLowerCase();
+        final matchName = s['name'].toString().toLowerCase().contains(q);
+        final matchRoll = s['roll_number'].toString().toLowerCase().contains(q);
+        if (!matchName && !matchRoll) return false;
+      }
+      final pct = (s['percentage'] as num).toDouble();
+      if (_filterBy == 'Below 75% (Shortage)' && pct >= 75) return false;
+      if (_filterBy == 'Above 75% (Safe)' && pct < 75) return false;
+      if (_filterBy == '100% Perfect' && pct < 100) return false;
+      return true;
+    }).toList();
+
+    if (_sortBy == 'Name (A-Z)') {
+      filtered.sort((a, b) => a['name'].toString().compareTo(b['name'].toString()));
+    } else if (_sortBy == 'Attendance: High to Low') {
+      filtered.sort((a, b) => (b['percentage'] as num).compareTo(a['percentage'] as num));
+    } else if (_sortBy == 'Attendance: Low to High') {
+      filtered.sort((a, b) => (a['percentage'] as num).compareTo(b['percentage'] as num));
+    }
 
     return Column(
       children: [
@@ -242,8 +325,60 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
           ),
         ),
 
+        // Sort & Filter Row
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _sortBy != 'Default' ? AttendLensTheme.accentCyan : Colors.white70,
+                    side: BorderSide(color: _sortBy != 'Default' ? AttendLensTheme.accentCyan : Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.sort_rounded, size: 18),
+                  label: Text(
+                    _sortBy == 'Default' ? 'Sort' : _sortBy.split(':')[0],
+                    style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: _showSortOptions,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _filterBy != 'All' ? AttendLensTheme.primaryIndigo : Colors.white70,
+                    side: BorderSide(color: _filterBy != 'All' ? AttendLensTheme.primaryIndigo : Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.filter_list_rounded, size: 18),
+                  label: Text(
+                    _filterBy == 'All' ? 'Filter' : _filterBy.split(' ')[0],
+                    style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: _showFilterOptions,
+                ),
+              ),
+              if (_sortBy != 'Default' || _filterBy != 'All') ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.clear_rounded, color: Colors.white54, size: 20),
+                  tooltip: 'Reset Filters',
+                  onPressed: () => setState(() { _sortBy = 'Default'; _filterBy = 'All'; }),
+                ),
+              ],
+            ],
+          ),
+        ),
+
         // At-risk banner
-        if (allStudents.any((s) => (s['percentage'] as num) < 75) && _searchQuery.isEmpty)
+        if (allStudents.any((s) => (s['percentage'] as num) < 75) && _searchQuery.isEmpty && _filterBy == 'All')
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
             child: Container(
@@ -310,6 +445,186 @@ class _StudentCard extends StatefulWidget {
 class _StudentCardState extends State<_StudentCard> {
   bool _expanded = false;
 
+  void _sendAtRiskAlert(double pct) {
+    final name = widget.student['name'];
+    final roll = widget.student['roll_number'];
+    final present = widget.student['present'];
+    final total = widget.student['total'];
+    final message = '🚨 AttendLens Academic Warning:\n\nHello $name (Roll No: $roll),\n\nYour attendance is currently at ${pct.toStringAsFixed(1)}% ($present Present / $total Total sessions), which falls below the mandatory 75% threshold.\n\nPlease attend upcoming classes regularly or contact the faculty advisor immediately to avoid attendance shortage penalties.';
+    Share.share(message, subject: 'AttendLens Shortage Warning: $name');
+  }
+
+  void _showHistoryEditorModal(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AttendLensTheme.surfaceDark,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          final history = List<Map<String, dynamic>>.from(widget.student['history'] ?? []);
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 20, left: 24, right: 24, top: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+                const SizedBox(height: 18),
+                Row(children: [
+                  const Icon(Icons.edit_calendar_rounded, color: AttendLensTheme.accentCyan, size: 24),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text("Past Attendance Editor", style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white))),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: AttendLensTheme.statusPresent, backgroundColor: AttendLensTheme.statusPresent.withOpacity(0.15), padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6)),
+                    icon: const Icon(Icons.add_circle_outline, size: 16),
+                    label: Text("Add Date", style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold)),
+                    onPressed: () async {
+                      final now = DateTime.now();
+                      final picked = await showDatePicker(
+                        context: ctx,
+                        initialDate: now,
+                        firstDate: DateTime(2024),
+                        lastDate: now,
+                        builder: (c, child) => Theme(data: ThemeData.dark(), child: child!),
+                      );
+                      if (picked != null) {
+                        final dateStr = "${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')} 09:00";
+                        try {
+                          await ApiService.updatePastAttendance(widget.student['id'], dateStr, 'P');
+                        } catch (_) {}
+                        setState(() {
+                          final existing = history.indexWhere((h) => h['date']?.toString().startsWith(dateStr.substring(0, 10)) ?? false);
+                          if (existing >= 0) {
+                            history[existing]['status'] = 'P';
+                            if (widget.student['history'] != null) (widget.student['history'] as List)[existing]['status'] = 'P';
+                          } else {
+                            final newRec = {'date': dateStr, 'status': 'P'};
+                            history.insert(0, newRec);
+                            if (widget.student['history'] == null) widget.student['history'] = [];
+                            (widget.student['history'] as List).insert(0, newRec);
+                          }
+                          _recomputeStats();
+                        });
+                        setModal(() {});
+                      }
+                    },
+                  ),
+                ]),
+                const SizedBox(height: 4),
+                Text("${widget.student['name']} (${widget.student['roll_number']}) — Tap status to modify or add dates", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 13)),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 300,
+                  child: history.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.calendar_today_outlined, size: 40, color: Colors.white24),
+                              const SizedBox(height: 12),
+                              Text("No past lecture records found.", style: GoogleFonts.outfit(color: Colors.white54, fontSize: 14)),
+                              const SizedBox(height: 6),
+                              Text("Tap 'Add Date' above to create a record.", style: GoogleFonts.outfit(color: AttendLensTheme.accentCyan, fontSize: 12)),
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          itemCount: history.length,
+                          separatorBuilder: (_, __) => const Divider(color: Colors.white12),
+                          itemBuilder: (_, i) {
+                            final h = history[i];
+                            final dateStr = h['date']?.toString() ?? 'Unknown Date';
+                            final status = h['status']?.toString() ?? '-';
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(dateStr, style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  GestureDetector(
+                                    onTap: () async {
+                                      if (status == 'P') return;
+                                      setModal(() => h['status'] = 'P');
+                                      setState(() {
+                                        h['status'] = 'P';
+                                        _recomputeStats();
+                                      });
+                                      try {
+                                        await ApiService.updatePastAttendance(widget.student['id'], dateStr, 'P');
+                                      } catch (_) {}
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: status == 'P' ? AttendLensTheme.statusPresent : Colors.white12,
+                                        borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
+                                      ),
+                                      child: Text("Present", style: GoogleFonts.outfit(color: status == 'P' ? Colors.white : Colors.white60, fontWeight: FontWeight.bold, fontSize: 12)),
+                                    ),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () async {
+                                      if (status == 'A') return;
+                                      setModal(() => h['status'] = 'A');
+                                      setState(() {
+                                        h['status'] = 'A';
+                                        _recomputeStats();
+                                      });
+                                      try {
+                                        await ApiService.updatePastAttendance(widget.student['id'], dateStr, 'A');
+                                      } catch (_) {}
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: status == 'A' ? AttendLensTheme.statusAbsent : Colors.white12,
+                                        borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
+                                      ),
+                                      child: Text("Absent", style: GoogleFonts.outfit(color: status == 'A' ? Colors.white : Colors.white60, fontWeight: FontWeight.bold, fontSize: 12)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: AttendLensTheme.primaryIndigo, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: Text("Done", style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _recomputeStats() {
+    final history = widget.student['history'] as List? ?? [];
+    int p = 0;
+    int t = 0;
+    for (var h in history) {
+      final s = h['status'];
+      if (s == 'P' || s == 'A') {
+        t++;
+        if (s == 'P') p++;
+      }
+    }
+    widget.student['present'] = p;
+    widget.student['total'] = t;
+    if (t > 0) {
+      widget.student['percentage'] = (p / t) * 100.0;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pct = (widget.student['percentage'] as num).toDouble();
@@ -325,7 +640,7 @@ class _StudentCardState extends State<_StudentCard> {
         decoration: BoxDecoration(
           color: AttendLensTheme.surfaceDark,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: pct < 75 ? color.withOpacity(0.4) : Colors.white.withOpacity(0.07)),
+          border: Border.all(color: pct < 75 ? color.withOpacity(0.5) : Colors.white.withOpacity(0.07), width: pct < 75 ? 1.5 : 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -357,30 +672,69 @@ class _StudentCardState extends State<_StudentCard> {
               ),
             ),
 
-            // Expanded: attendance history dots
-            if (_expanded && history.isNotEmpty) ...[
+            // Smart At-Risk Alert Nudge (if below 75%)
+            if (pct < 75) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(color: Colors.orange.withOpacity(0.12), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.orange.withOpacity(0.4))),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text("Shortage Alert Trigger (<75%)", style: GoogleFonts.outfit(color: Colors.orangeAccent, fontSize: 12, fontWeight: FontWeight.w600))),
+                    TextButton.icon(
+                      style: TextButton.styleFrom(foregroundColor: Colors.white, backgroundColor: Colors.orange.shade800, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      icon: const Icon(Icons.send_rounded, size: 14),
+                      label: Text("Nudge", style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold)),
+                      onPressed: () => _sendAtRiskAlert(pct),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // Expanded: attendance history dots + editor trigger
+            if (_expanded) ...[
               const SizedBox(height: 14),
               const Divider(color: Colors.white12),
               const SizedBox(height: 8),
-              Text('Attendance History', style: GoogleFonts.outfit(fontSize: 12, color: AttendLensTheme.textSecondary, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6, runSpacing: 6,
-                children: history.map<Widget>((h) {
-                  final status = h['status'] as String;
-                  final isPresent = status == 'P';
-                  final isAbsent = status == 'A';
-                  final color = isPresent ? AttendLensTheme.statusPresent : isAbsent ? AttendLensTheme.statusAbsent : Colors.grey;
-                  return Tooltip(
-                    message: '${h['date']}: ${isPresent ? 'Present' : isAbsent ? 'Absent' : 'No record'}',
-                    child: Container(
-                      width: 28, height: 28,
-                      decoration: BoxDecoration(color: color.withOpacity(0.18), shape: BoxShape.circle, border: Border.all(color: color.withOpacity(0.5))),
-                      child: Center(child: Text(status, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold))),
-                    ),
-                  );
-                }).toList(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Attendance History (${history.length} lectures)', style: GoogleFonts.outfit(fontSize: 12, color: AttendLensTheme.textSecondary, fontWeight: FontWeight.w600)),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: AttendLensTheme.accentCyan, padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    icon: const Icon(Icons.edit_outlined, size: 14),
+                    label: Text("Edit History", style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold)),
+                    onPressed: () => _showHistoryEditorModal(context),
+                  ),
+                ],
               ),
+              const SizedBox(height: 10),
+              if (history.isNotEmpty)
+                Wrap(
+                  spacing: 6, runSpacing: 6,
+                  children: history.map<Widget>((h) {
+                    final status = h['status'] as String;
+                    final isPresent = status == 'P';
+                    final isAbsent = status == 'A';
+                    final dotColor = isPresent ? AttendLensTheme.statusPresent : isAbsent ? AttendLensTheme.statusAbsent : Colors.grey;
+                    return GestureDetector(
+                      onTap: () => _showHistoryEditorModal(context),
+                      child: Tooltip(
+                        message: '${h['date']}: ${isPresent ? 'Present' : isAbsent ? 'Absent' : 'No record'} (Tap to edit)',
+                        child: Container(
+                          width: 28, height: 28,
+                          decoration: BoxDecoration(color: dotColor.withOpacity(0.18), shape: BoxShape.circle, border: Border.all(color: dotColor.withOpacity(0.5))),
+                          child: Center(child: Text(status, style: TextStyle(fontSize: 10, color: dotColor, fontWeight: FontWeight.bold))),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                )
+              else
+                Text('No lecture attendance records yet.', style: GoogleFonts.outfit(color: Colors.white38, fontSize: 12)),
             ],
           ],
         ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -21,12 +22,32 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
   List<CameraDescription>? _cameras;
   bool _isRecording = false;
   bool _isProcessing = false;
-  String _statusMessage = "Slowly pan across the classroom from left to right ➡️";
+  bool _isAiWarmingUp = false;
+  String _statusMessage = "Slowly pan across the classroom";
+  Timer? _liveStreamTimer;
+  bool _isStreamingFrame = false;
+  final Map<int, Map<String, dynamic>> _livePresentStudents = {};
+  List<Map<String, dynamic>> _allClassStudents = [];
+  List<Map<String, dynamic>> _liveFaceBoxes = [];
 
   @override
   void initState() {
     super.initState();
     _initCamera();
+    _loadClassStudents();
+  }
+
+  Future<void> _loadClassStudents() async {
+    try {
+      final list = await ApiService.getStudents(widget.classId);
+      if (mounted) {
+        setState(() {
+          _allClassStudents = List<Map<String, dynamic>>.from(list);
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading class students: $e");
+    }
   }
 
   Future<void> _initCamera() async {
@@ -35,7 +56,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       if (_cameras != null && _cameras!.isNotEmpty) {
         _cameraController = CameraController(
           _cameras!.first,
-          ResolutionPreset.high,
+          ResolutionPreset.medium,
           enableAudio: false,
         );
         await _cameraController!.initialize();
@@ -49,66 +70,118 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
   Future<void> _startRecording() async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) return;
     
-    try {
-      await _cameraController!.startVideoRecording();
-      setState(() {
-        _isRecording = true;
-        _statusMessage = "🔴 RECORDING... Tap the stop button when done panning!";
-      });
-    } catch (e) {
-      setState(() {
-        _statusMessage = "Could not start recording: $e";
-      });
-    }
+    setState(() {
+      _isRecording = true;
+      _isAiWarmingUp = true;
+      _livePresentStudents.clear();
+      _liveFaceBoxes.clear();
+      _statusMessage = "⏳ Making the AI ready... Initializing camera stream!";
+    });
+
+    _liveStreamTimer = Timer.periodic(const Duration(milliseconds: 350), (timer) async {
+      if (!_isRecording || _isStreamingFrame || _cameraController == null) return;
+      _isStreamingFrame = true;
+      try {
+        final XFile photoFile = await _cameraController!.takePicture();
+        final results = await ApiService.streamFrame(widget.classId, File(photoFile.path));
+        
+        if (mounted) {
+          final matchedList = List<Map<String, dynamic>>.from(results["matched_students"]);
+          if (results["all_students"] != null) {
+            _allClassStudents = List<Map<String, dynamic>>.from(results["all_students"]);
+          }
+          if (results["face_boxes"] != null) {
+            _liveFaceBoxes = List<Map<String, dynamic>>.from(results["face_boxes"]);
+          }
+          
+          for (var st in matchedList) {
+            final stId = int.parse(st["id"].toString());
+            if (!_livePresentStudents.containsKey(stId)) {
+              _livePresentStudents[stId] = st;
+            }
+          }
+          
+          if (_isRecording) {
+            setState(() {
+              _isAiWarmingUp = false;
+              if (_livePresentStudents.isEmpty) {
+                _statusMessage = "🔴 LIVE SCANNING... Slowly pan camera across student faces!";
+              } else {
+                _statusMessage = "🔴 LIVE SCANNING: Found ${_livePresentStudents.length} / ${_allClassStudents.length} students!";
+              }
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint("Live stream frame error: $e");
+      } finally {
+        _isStreamingFrame = false;
+      }
+    });
   }
 
   Future<void> _stopRecordingAndAnalyze() async {
-    if (!_isRecording || _cameraController == null) return;
+    if (!_isRecording) return;
     
-    try {
-      final XFile videoFile = await _cameraController!.stopVideoRecording();
-      setState(() {
-        _isRecording = false;
-        _isProcessing = true;
-        _statusMessage = "🧠 AI Face Recognition analyzing classroom frames... Please wait!";
-      });
+    _liveStreamTimer?.cancel();
+    _liveStreamTimer = null;
+    
+    setState(() {
+      _isRecording = false;
+      _isProcessing = true;
+      _liveFaceBoxes.clear();
+      _statusMessage = "⚡ Finalizing live attendance results... Please wait!";
+    });
 
+    // Wait up to 3 seconds for any in-flight frame analysis to finish
+    int waited = 0;
+    while (_isStreamingFrame && waited < 30) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      waited++;
+    }
+
+    // If no students were matched yet (e.g. stopped very quickly), do one final check
+    if (_livePresentStudents.isEmpty && _cameraController != null && _cameraController!.value.isInitialized) {
       try {
-        final results = await ApiService.scanVideo(widget.classId, File(videoFile.path));
-
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => AttendanceReviewScreen(
-                classId: widget.classId,
-                className: widget.className,
-                initialPresent: List<Map<String, dynamic>>.from(results["present_students"]),
-                initialAbsent: List<Map<String, dynamic>>.from(results["absent_students"]),
-              ),
-            ),
-          );
+        final XFile photoFile = await _cameraController!.takePicture();
+        final results = await ApiService.streamFrame(widget.classId, File(photoFile.path));
+        if (results["matched_students"] != null) {
+          final matchedList = List<Map<String, dynamic>>.from(results["matched_students"]);
+          if (results["all_students"] != null) {
+            _allClassStudents = List<Map<String, dynamic>>.from(results["all_students"]);
+          }
+          for (var st in matchedList) {
+            final stId = int.parse(st["id"].toString());
+            _livePresentStudents[stId] = st;
+          }
         }
       } catch (e) {
-        // Show real error instead of injecting fake data
-        if (mounted) {
-          setState(() {
-            _isProcessing = false;
-            _statusMessage = "❌ Backend error: $e\n\nMake sure backend is running and try again.";
-          });
-        }
+        debugPrint("Final check error: $e");
       }
-    } catch (e) {
-      setState(() {
-        _isProcessing = false;
-        _statusMessage = "Error stopping video: $e. Please try again.";
-      });
+    }
+
+    final presentList = _livePresentStudents.values.toList();
+    final presentIds = _livePresentStudents.keys.toSet();
+    final absentList = _allClassStudents.where((st) => !presentIds.contains(int.parse(st["id"].toString()))).toList();
+
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AttendanceReviewScreen(
+            classId: widget.classId,
+            className: widget.className,
+            initialPresent: presentList,
+            initialAbsent: absentList,
+          ),
+        ),
+      );
     }
   }
 
-
   @override
   void dispose() {
+    _liveStreamTimer?.cancel();
     _cameraController?.dispose();
     super.dispose();
   }
@@ -135,6 +208,14 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                     ),
                   ),
                 ),
+
+          // Live AR Face Bounding Box Overlay
+          if (_isRecording && _liveFaceBoxes.isNotEmpty)
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _FaceBoundingBoxPainter(_liveFaceBoxes),
+              ),
+            ),
           
           // Top Overlay: Class Name & Close Button
           SafeArea(
@@ -144,8 +225,8 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    decoration: AttendLensTheme.glassDecoration,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(20)),
                     child: Row(
                       children: [
                         const Icon(Icons.school, color: AttendLensTheme.accentCyan, size: 20),
@@ -211,8 +292,8 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        if (_isProcessing) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AttendLensTheme.accentCyan)),
-                        if (_isProcessing) const SizedBox(width: 12),
+                        if (_isProcessing || _isAiWarmingUp) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AttendLensTheme.accentCyan)),
+                        if (_isProcessing || _isAiWarmingUp) const SizedBox(width: 12),
                         Flexible(
                           child: Text(
                             _statusMessage,
@@ -252,4 +333,37 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       ),
     );
   }
+}
+
+class _FaceBoundingBoxPainter extends CustomPainter {
+  final List<Map<String, dynamic>> boxes;
+  _FaceBoundingBoxPainter(this.boxes);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final item in boxes) {
+      final box = item['box'] as Map<String, dynamic>? ?? {};
+      final double left = (box['left'] as num? ?? 0.0).toDouble() * size.width;
+      final double top = (box['top'] as num? ?? 0.0).toDouble() * size.height;
+      final double width = (box['width'] as num? ?? 0.0).toDouble() * size.width;
+      final double height = (box['height'] as num? ?? 0.0).toDouble() * size.height;
+      final bool isMatched = item['id'] != null;
+
+      if (width <= 0 || height <= 0) continue;
+
+      final Rect rect = Rect.fromLTWH(left, top, width, height);
+
+      // Ultra-thin 0.7mm pen/pencil style stroke (strokeWidth: 1.0)
+      // Red when detecting/unrecognized, Green when recognized
+      final Paint borderPaint = Paint()
+        ..color = isMatched ? Colors.greenAccent : Colors.redAccent
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0;
+
+      canvas.drawRect(rect, borderPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _FaceBoundingBoxPainter oldDelegate) => true;
 }

@@ -123,7 +123,16 @@ def _build_html(class_id: int, class_name: str, required_photos: int) -> str:
           fd.append('classroom_id', CLASS_ID);
           fd.append('photo', valid[0]);
           const res = await fetch(API_BASE + '/students', { method: 'POST', body: fd });
-          if (!res.ok) throw new Error(await res.text());
+          if (!res.ok) {
+            let errorMsg = 'Registration failed';
+            try {
+              const errJson = await res.json();
+              if (errJson.detail) errorMsg = errJson.detail;
+            } catch (_) {
+              errorMsg = await res.text();
+            }
+            throw new Error(errorMsg);
+          }
           const student = await res.json();
 
           for (let i = 1; i < valid.length; i++) {
