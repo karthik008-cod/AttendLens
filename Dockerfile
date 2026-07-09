@@ -9,6 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Install system dependencies required by OpenCV and numerical libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
