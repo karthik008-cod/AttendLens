@@ -76,12 +76,16 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     }
   }
 
+  DateTime? _lastFrameSendTime;
+
   Future<void> _startRecording() async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) return;
     
     setState(() {
       _isRecording = true;
       _isAiWarmingUp = true;
+      _isStreamingFrame = false;
+      _lastFrameSendTime = null;
       _livePresentStudents.clear();
       _liveFaceBoxes.clear();
       _statusMessage = "⏳ Making the AI ready... Initializing ultra-fast stream!";
@@ -109,6 +113,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
           }
           if (_isRecording) {
             setState(() {
+              _isStreamingFrame = false; // Allow next frame to be captured and sent
               _isAiWarmingUp = false;
               if (_livePresentStudents.isEmpty) {
                 _statusMessage = "🔴 LIVE SCANNING... Slowly pan camera across student faces!";
@@ -119,15 +124,34 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
           }
         } catch (e) {
           debugPrint("Ws decode error: $e");
+          _isStreamingFrame = false;
         }
       });
     } catch (e) {
       debugPrint("WebSocket connect failed, using HTTP fallback: $e");
     }
 
-    _liveStreamTimer = Timer.periodic(const Duration(milliseconds: 220), (timer) async {
-      if (!_isRecording || _isStreamingFrame || _cameraController == null) return;
+    _liveStreamTimer = Timer.periodic(const Duration(milliseconds: 400), (timer) async {
+      if (!_isRecording || _cameraController == null || !_cameraController!.value.isInitialized) return;
+
+      // Watchdog timeout: if server hasn't replied to previous frame in 2.5s, unlock to send next frame
+      if (_isStreamingFrame) {
+        if (_lastFrameSendTime != null && DateTime.now().difference(_lastFrameSendTime!).inMilliseconds > 2500) {
+          _isStreamingFrame = false;
+          if (_isAiWarmingUp && mounted) {
+            setState(() {
+              _isAiWarmingUp = false;
+              _statusMessage = "🔴 LIVE SCANNING... Slowly pan camera across student faces!";
+            });
+          }
+        } else {
+          return; // Still waiting for server to finish processing current frame
+        }
+      }
+
       _isStreamingFrame = true;
+      _lastFrameSendTime = DateTime.now();
+
       try {
         final XFile photoFile = await _cameraController!.takePicture();
         final List<int> rawBytes = await photoFile.readAsBytes();
@@ -135,36 +159,39 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
         // Try WebSocket first with zero disk/TCP overhead (#3 & #1)
         if (!ApiService.sendLiveScanFrameBytes(rawBytes)) {
           // HTTP Fallback
-          final results = await ApiService.streamFrame(widget.classId, File(photoFile.path));
-          if (mounted) {
-            final matchedList = List<Map<String, dynamic>>.from(results["matched_students"]);
-            if (results["all_students"] != null) {
-              _allClassStudents = List<Map<String, dynamic>>.from(results["all_students"]);
-            }
-            if (results["face_boxes"] != null) {
-              _liveFaceBoxes = List<Map<String, dynamic>>.from(results["face_boxes"]);
-            }
-            for (var st in matchedList) {
-              final stId = int.parse(st["id"].toString());
-              if (!_livePresentStudents.containsKey(stId)) {
-                _livePresentStudents[stId] = st;
+          try {
+            final results = await ApiService.streamFrame(widget.classId, File(photoFile.path));
+            if (mounted) {
+              final matchedList = List<Map<String, dynamic>>.from(results["matched_students"]);
+              if (results["all_students"] != null) {
+                _allClassStudents = List<Map<String, dynamic>>.from(results["all_students"]);
+              }
+              if (results["face_boxes"] != null) {
+                _liveFaceBoxes = List<Map<String, dynamic>>.from(results["face_boxes"]);
+              }
+              for (var st in matchedList) {
+                final stId = int.parse(st["id"].toString());
+                if (!_livePresentStudents.containsKey(stId)) {
+                  _livePresentStudents[stId] = st;
+                }
+              }
+              if (_isRecording) {
+                setState(() {
+                  _isAiWarmingUp = false;
+                  if (_livePresentStudents.isEmpty) {
+                    _statusMessage = "🔴 LIVE SCANNING... Slowly pan camera across student faces!";
+                  } else {
+                    _statusMessage = "🔴 LIVE SCANNING: Found ${_livePresentStudents.length} / ${_allClassStudents.length} students!";
+                  }
+                });
               }
             }
-            if (_isRecording) {
-              setState(() {
-                _isAiWarmingUp = false;
-                if (_livePresentStudents.isEmpty) {
-                  _statusMessage = "🔴 LIVE SCANNING... Slowly pan camera across student faces!";
-                } else {
-                  _statusMessage = "🔴 LIVE SCANNING: Found ${_livePresentStudents.length} / ${_allClassStudents.length} students!";
-                }
-              });
-            }
+          } finally {
+            _isStreamingFrame = false;
           }
         }
       } catch (e) {
         debugPrint("Live stream frame error: $e");
-      } finally {
         _isStreamingFrame = false;
       }
     });

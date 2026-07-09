@@ -361,11 +361,11 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
         if img is None:
             return {"matched_ids": [], "face_boxes": []}
 
-        # Keep 800px width so distant classroom faces remain large enough (~30-40px) for deep learning detectors
+        # Keep 640px width for ultra-fast deep learning detection on Render CPU tier
         h, w = img.shape[:2]
-        if w > 800:
-            scale = 800 / w
-            img_w = 800
+        if w > 640:
+            scale = 640 / w
+            img_w = 640
             img_h = int(h * scale)
             img = cv2.resize(img, (img_w, img_h))
             if image_path and os.path.exists(image_path) and raw_bytes is None:

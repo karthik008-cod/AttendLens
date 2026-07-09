@@ -471,7 +471,9 @@ async def stream_frame(
     encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding")}
     student_map = {s["id"]: _student_dict(s, db) for s in students}
 
-    frame_res = process_single_frame(image_path=None, student_encodings=encodings, student_info=student_map, raw_bytes=raw_bytes)
+    frame_res = await asyncio.to_thread(
+        process_single_frame, None, encodings, student_map, raw_bytes
+    )
     if isinstance(frame_res, dict):
         matched_ids = set(frame_res.get("matched_ids", []))
         face_boxes = frame_res.get("face_boxes", [])
@@ -509,7 +511,9 @@ async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db = Depe
             raw_bytes = await websocket.receive_bytes()
             if not raw_bytes:
                 continue
-            frame_res = process_single_frame(image_path=None, student_encodings=encodings, student_info=student_map, raw_bytes=raw_bytes)
+            frame_res = await asyncio.to_thread(
+                process_single_frame, None, encodings, student_map, raw_bytes
+            )
             if isinstance(frame_res, dict):
                 matched_ids = set(frame_res.get("matched_ids", []))
                 face_boxes = frame_res.get("face_boxes", [])
