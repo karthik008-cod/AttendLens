@@ -234,13 +234,27 @@ def _process_student_photos_bg(student_id: int, file_paths: List[str]):
 
         for path in file_paths:
             try:
-                enc = extract_face_encoding(path)
                 existing = db.student_photos.find_one({"student_id": student_id, "photo_path": path})
-                if existing:
-                    db.student_photos.update_one({"id": existing["id"]}, {"$set": {"face_encoding": enc}})
-                else:
-                    sp_id = get_next_id("student_photos")
-                    db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": path, "face_encoding": enc})
+                if not existing:
+                    # Also try checking if we have any photo for this student if exact path differs
+                    existing = db.student_photos.find_one({"student_id": student_id})
+
+                if not os.path.exists(path):
+                    if existing and existing.get("photo_bytes"):
+                        try:
+                            os.makedirs(os.path.dirname(path), exist_ok=True)
+                            with open(path, "wb") as f:
+                                f.write(existing["photo_bytes"])
+                        except Exception:
+                            pass
+
+                if os.path.exists(path):
+                    enc = extract_face_encoding(path)
+                    if existing:
+                        db.student_photos.update_one({"id": existing["id"]}, {"$set": {"face_encoding": enc}})
+                    else:
+                        sp_id = get_next_id("student_photos")
+                        db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": path, "face_encoding": enc})
             except Exception as e:
                 print(f"Error processing individual photo {path}: {e}")
 
@@ -251,6 +265,32 @@ def _process_student_photos_bg(student_id: int, file_paths: List[str]):
             db.students.update_one({"id": student_id}, {"$set": {"face_encoding": avg_enc}})
     except Exception as e:
         print(f"Background photo processing error for student {student_id}: {e}")
+
+
+def _ensure_student_encodings_ready(students_list: list, db):
+    """Self-healing helper: if any student has missing or processing... face_encoding, recover from MongoDB photo_bytes and compute right now!"""
+    for s in students_list:
+        if not s.get("face_encoding") or s.get("face_encoding") == "processing...":
+            all_photos = list(db.student_photos.find({"student_id": s["id"]}))
+            valid_paths = []
+            for p in all_photos:
+                ppath = p.get("photo_path")
+                if not ppath:
+                    continue
+                if not os.path.exists(ppath) and p.get("photo_bytes"):
+                    try:
+                        os.makedirs(os.path.dirname(ppath), exist_ok=True)
+                        with open(ppath, "wb") as f:
+                            f.write(p["photo_bytes"])
+                    except Exception:
+                        pass
+                if os.path.exists(ppath):
+                    valid_paths.append(ppath)
+            if valid_paths:
+                _process_student_photos_bg(s["id"], valid_paths)
+                updated_s = db.students.find_one({"id": s["id"]})
+                if updated_s and updated_s.get("face_encoding") and updated_s.get("face_encoding") != "processing...":
+                    s["face_encoding"] = updated_s["face_encoding"]
 
 
 @router.post("/students")
@@ -272,6 +312,7 @@ async def add_student(
             )
 
     photo_path = None
+    content = None
     if photo:
         safe_fname = os.path.basename(photo.filename or "photo.jpg")
         file_path = os.path.join(UPLOAD_DIR, f"student_{roll_number}_{safe_fname}")
@@ -294,7 +335,7 @@ async def add_student(
 
     if photo_path:
         sp_id = get_next_id("student_photos")
-        db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": photo_path, "face_encoding": "processing..."})
+        db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": photo_path, "face_encoding": "processing...", "photo_bytes": content})
         background_tasks.add_task(_process_student_photos_bg, s_id, [photo_path])
     return _student_dict(student, db)
 
@@ -322,6 +363,7 @@ async def add_student_batch(
             )
 
     file_paths = []
+    file_contents = []
     for idx, photo in enumerate(photos):
         safe_fname = os.path.basename(photo.filename or f"photo_{idx}.jpg")
         file_path = os.path.join(UPLOAD_DIR, f"student_{roll_number}_{idx+1}_{safe_fname}")
@@ -330,6 +372,7 @@ async def add_student_batch(
             buffer.write(content)
         await photo.close()
         file_paths.append(file_path)
+        file_contents.append(content)
 
     s_id = get_next_id("students")
     student = {
@@ -342,9 +385,9 @@ async def add_student_batch(
     }
     db.students.insert_one(student)
 
-    for path in file_paths:
+    for idx, path in enumerate(file_paths):
         sp_id = get_next_id("student_photos")
-        db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": path, "face_encoding": "processing..."})
+        db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": path, "face_encoding": "processing...", "photo_bytes": file_contents[idx]})
 
     background_tasks.add_task(_process_student_photos_bg, s_id, file_paths)
     return _student_dict(student, db)
@@ -374,7 +417,7 @@ async def add_student_photo(
         s["photo_path"] = file_path
 
     sp_id = get_next_id("student_photos")
-    db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": file_path, "face_encoding": "processing..."})
+    db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": file_path, "face_encoding": "processing...", "photo_bytes": content})
 
     background_tasks.add_task(_process_student_photos_bg, student_id, [file_path])
 
@@ -393,10 +436,13 @@ def update_student(student_id: int, update: StudentUpdate, db = Depends(get_db))
     update_fields = {}
     if update.name is not None: update_fields["name"] = update.name
     if update.roll_number is not None: update_fields["roll_number"] = update.roll_number
+    if update.parent_phone is not None: update_fields["parent_phone"] = update.parent_phone
+    if update.parent_email is not None: update_fields["parent_email"] = update.parent_email
     
     if update_fields:
         db.students.update_one({"id": student_id}, {"$set": update_fields})
         s.update(update_fields)
+        
     return _student_dict(s, db)
 
 
@@ -405,10 +451,19 @@ def delete_student(student_id: int, db = Depends(get_db)):
     s = db.students.find_one({"id": student_id})
     if not s:
         raise HTTPException(status_code=404, detail="Student not found")
-    db.students.delete_one({"id": student_id})
+    if s.get("photo_path") and os.path.exists(s["photo_path"]):
+        try: os.remove(s["photo_path"])
+        except Exception: pass
+    
+    # Also delete extra photos
+    extra_photos = list(db.student_photos.find({"student_id": student_id}))
+    for ep in extra_photos:
+        if ep.get("photo_path") and os.path.exists(ep["photo_path"]):
+            try: os.remove(ep["photo_path"])
+            except Exception: pass
     db.student_photos.delete_many({"student_id": student_id})
-    db.attendance_records.delete_many({"student_id": student_id})
-    return {"message": "Student deleted successfully"}
+    db.students.delete_one({"id": student_id})
+    return {"status": "deleted"}
 
 
 @router.post("/students/check-quality")
@@ -437,25 +492,41 @@ def check_photo_quality(photo: UploadFile = File(...)):
 # ── Attendance ────────────────────────────────────────────────────────────────
 
 @router.post("/attendance/scan")
-def scan_video(
+async def scan_video(
     classroom_id: int = Form(...),
     video: UploadFile = File(...),
     db = Depends(get_db),
 ):
-    video_path = os.path.join(UPLOAD_DIR, f"scan_{classroom_id}_{video.filename}")
-    with open(video_path, "wb") as buffer:
-        shutil.copyfileobj(video.file, buffer)
-
+    """Processes a classroom video clip, identifies student faces, and returns attendance summary."""
+    safe_fname = os.path.basename(video.filename or "video.mp4")
+    file_path = os.path.join(UPLOAD_DIR, f"scan_{classroom_id}_{safe_fname}")
+    
+    with open(file_path, "wb") as buffer:
+        content = await video.read()
+        buffer.write(content)
+        
     students = list(db.students.find({"classroom_id": classroom_id}))
-    encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding")}
+    _ensure_student_encodings_ready(students, db)
+    encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding") and s.get("face_encoding") != "processing..."}
     student_map = {s["id"]: _student_dict(s, db) for s in students}
-
-    results = process_classroom_video(video_path, encodings, student_map)
-
-    present_list = [_student_dict(s, db) for s in students if s["id"] in results["present_student_ids"]]
-    absent_list  = [_student_dict(s, db) for s in students if s["id"] in results["absent_student_ids"]]
-
-    return {"present_students": present_list, "absent_students": absent_list}
+    
+    # Run heavy video processing in background worker pool so server stays responsive
+    matched_ids, video_stats = await asyncio.to_thread(
+        process_classroom_video, file_path, encodings, student_map
+    )
+    
+    present_list = [student_map[s_id] for s_id in matched_ids if s_id in student_map]
+    absent_list = [student_map[s["id"]] for s in students if s["id"] not in matched_ids]
+    
+    return {
+        "status": "success",
+        "video_path": file_path,
+        "present_count": len(present_list),
+        "absent_count": len(absent_list),
+        "present_students": present_list,
+        "absent_students": absent_list,
+        "stats": video_stats,
+    }
 
 
 @router.post("/attendance/stream-frame")
@@ -468,7 +539,8 @@ async def stream_frame(
     raw_bytes = await frame.read()
 
     students = list(db.students.find({"classroom_id": classroom_id}))
-    encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding")}
+    _ensure_student_encodings_ready(students, db)
+    encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding") and s.get("face_encoding") != "processing..."}
     student_map = {s["id"]: _student_dict(s, db) for s in students}
 
     frame_res = await asyncio.to_thread(
@@ -503,7 +575,8 @@ async def stream_frame(
 async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db = Depends(get_db)):
     await websocket.accept()
     students = list(db.students.find({"classroom_id": classroom_id}))
-    encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding")}
+    _ensure_student_encodings_ready(students, db)
+    encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding") and s.get("face_encoding") != "processing..."}
     student_map = {s["id"]: _student_dict(s, db) for s in students}
 
     try:

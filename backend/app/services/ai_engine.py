@@ -379,13 +379,13 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
 
     # Detect target model and threshold
     target_model = "Facenet512"
-    threshold = 0.48  # Stricter threshold (0.48) to ensure high confidence recognition during live scanning
+    threshold = 0.52  # Optimized threshold (0.52) for robust recognition across room distances and variable lighting
     for s_id, s_emb_str in student_encodings.items():
         try:
             s_emb = np.array(json.loads(s_emb_str))
             if len(s_emb) == 128:
                 target_model = "Facenet"
-                threshold = 0.50
+                threshold = 0.55
             break
         except Exception:
             pass
@@ -433,8 +433,8 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
             for face_obj in frame_faces:
                 # Strict Confidence & Lens Obstruction Check
                 conf = face_obj.get("face_confidence", 1.0)
-                if conf is not None and conf < 0.70:
-                    print(f"Live Frame: Face ignored due to low detector confidence ({conf:.2f} < 0.70)")
+                if conf is not None and conf < 0.55:
+                    print(f"Live Frame: Face ignored due to low detector confidence ({conf:.2f} < 0.55)")
                     continue
 
                 frame_emb = np.array(face_obj["embedding"], dtype=np.float32)
@@ -444,16 +444,16 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
                 fw = int(area.get("w", area.get("width", 100)))
                 fh = int(area.get("h", area.get("height", 100)))
 
-                # If face bounding box takes up more than 50% of screen width, an object (finger/palm) is pressed against lens!
-                if fw > max(img_w, 1) * 0.50:
-                    print(f"Live Frame: Object blocking camera lens or too close (width {fw}px > 50% screen). Ignored.")
+                # If face bounding box takes up more than 60% of screen width, an object (finger/palm) is pressed against lens!
+                if fw > max(img_w, 1) * 0.60:
+                    print(f"Live Frame: Object blocking camera lens or too close (width {fw}px > 60% screen). Ignored.")
                     continue
 
                 # ── Dynamic Distance-Scaled Confidence Meter (6-8m max classroom length) ──
                 face_ratio = max(fw / max(img_w, 1), 0.015)
                 est_meters = round(min(max(0.16 / face_ratio, 0.6), 8.0), 1)
-                offset = (est_meters - 3.5) * 0.015
-                dynamic_threshold = round(min(max(threshold + offset, threshold - 0.04), threshold + 0.07), 3)
+                offset = (est_meters - 3.5) * 0.018
+                dynamic_threshold = round(min(max(threshold + offset, threshold - 0.05), threshold + 0.08), 3)
 
                 best_match_id = None
                 best_dist = float("inf")
