@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
-from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import Classroom
 
@@ -8,12 +7,12 @@ invite_router = APIRouter()
 
 
 @invite_router.get("/invite/{class_id}", response_class=HTMLResponse)
-def student_invite_page(class_id: int, db: Session = Depends(get_db)):
+def student_invite_page(class_id: int, db = Depends(get_db)):
     """Serves a mobile-friendly HTML form for student self-registration."""
-    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
-    class_name = classroom.name if classroom else f"Class #{class_id}"
-    section_label = f" — Section {classroom.section}" if classroom and classroom.section else ""
-    required_photos = classroom.required_photos if classroom else 1
+    classroom = db.classrooms.find_one({"id": class_id})
+    class_name = classroom["name"] if classroom else f"Class #{class_id}"
+    section_label = f" — Section {classroom['section']}" if classroom and classroom.get("section") else ""
+    required_photos = classroom.get("required_photos", 3) if classroom else 3
 
     return HTMLResponse(content=_build_html(class_id, class_name + section_label, required_photos))
 

@@ -3,10 +3,9 @@ import shutil
 from typing import List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import bcrypt
-from app.db.database import get_db
+from app.db.database import get_db, get_next_id
 from app.db.models import Teacher, Classroom, Student, StudentPhoto, LectureDate, AttendanceRecord
 from app.services.ai_engine import extract_face_encoding, merge_student_encodings, merge_encoding_strings, process_classroom_video, process_single_frame, assess_photo_quality_and_liveness
 from app.services.excel_service import generate_class_excel
@@ -75,60 +74,64 @@ class AttendanceUpdateRequest(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _teacher_dict(t: Teacher) -> dict:
+def _teacher_dict(t: dict) -> dict:
     return {
-        "id": t.id,
-        "name": t.name,
-        "email": t.email,
-        "institution": t.institution,
-        "subject_specialization": t.subject_specialization,
+        "id": t.get("id"),
+        "name": t.get("name"),
+        "email": t.get("email"),
+        "institution": t.get("institution"),
+        "subject_specialization": t.get("subject_specialization"),
     }
 
-def _classroom_dict(c: Classroom) -> dict:
+def _classroom_dict(c: dict, db) -> dict:
+    student_count = db.students.count_documents({"classroom_id": c["id"]})
     return {
-        "id": c.id,
-        "name": c.name,
-        "subject": c.subject,
-        "section": c.section,
-        "required_photos": c.required_photos,
-        "student_count": len(c.students),
+        "id": c.get("id"),
+        "name": c.get("name"),
+        "subject": c.get("subject"),
+        "section": c.get("section"),
+        "required_photos": c.get("required_photos", 3),
+        "student_count": student_count,
     }
 
-def _student_dict(s: Student) -> dict:
+def _student_dict(s: dict, db=None) -> dict:
+    photo_count = db.student_photos.count_documents({"student_id": s["id"]}) if db is not None else 1
+    if photo_count == 0 and s.get("photo_path"):
+        photo_count = 1
     return {
-        "id": s.id,
-        "name": s.name,
-        "roll_number": s.roll_number,
-        "photo_path": s.photo_path,
-        "photo_count": len(s.photos) if s.photos is not None else (1 if s.photo_path else 0),
+        "id": s.get("id"),
+        "name": s.get("name"),
+        "roll_number": s.get("roll_number"),
+        "photo_path": s.get("photo_path"),
+        "photo_count": photo_count,
     }
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @router.post("/register")
-def register_teacher(teacher: TeacherCreate, db: Session = Depends(get_db)):
-    existing = db.query(Teacher).filter(Teacher.email == teacher.email).first()
+def register_teacher(teacher: TeacherCreate, db = Depends(get_db)):
+    existing = db.teachers.find_one({"email": teacher.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
     hashed_pw = hash_password(teacher.password)
-    new_teacher = Teacher(
-        name=teacher.name,
-        email=teacher.email,
-        password_hash=hashed_pw,
-        institution=teacher.institution,
-        subject_specialization=teacher.subject_specialization,
-    )
-    db.add(new_teacher)
-    db.commit()
-    db.refresh(new_teacher)
+    t_id = get_next_id("teachers")
+    new_teacher = {
+        "id": t_id,
+        "name": teacher.name,
+        "email": teacher.email,
+        "password_hash": hashed_pw,
+        "institution": teacher.institution,
+        "subject_specialization": teacher.subject_specialization,
+    }
+    db.teachers.insert_one(new_teacher)
     return _teacher_dict(new_teacher)
 
 
 @router.post("/login")
-def login_teacher(creds: TeacherLogin, db: Session = Depends(get_db)):
-    teacher = db.query(Teacher).filter(Teacher.email == creds.email).first()
-    if not teacher or not verify_password(creds.password, teacher.password_hash):
+def login_teacher(creds: TeacherLogin, db = Depends(get_db)):
+    teacher = db.teachers.find_one({"email": creds.email})
+    if not teacher or not verify_password(creds.password, teacher["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     return _teacher_dict(teacher)
 
@@ -136,119 +139,111 @@ def login_teacher(creds: TeacherLogin, db: Session = Depends(get_db)):
 # ── Teacher Profile ───────────────────────────────────────────────────────────
 
 @router.get("/teacher/{teacher_id}")
-def get_teacher(teacher_id: int, db: Session = Depends(get_db)):
-    t = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+def get_teacher(teacher_id: int, db = Depends(get_db)):
+    t = db.teachers.find_one({"id": teacher_id})
     if not t:
         raise HTTPException(status_code=404, detail="Teacher not found")
     return _teacher_dict(t)
 
 
 @router.put("/teacher/{teacher_id}")
-def update_teacher(teacher_id: int, update: TeacherUpdate, db: Session = Depends(get_db)):
-    t = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+def update_teacher(teacher_id: int, update_data: TeacherUpdate, db = Depends(get_db)):
+    t = db.teachers.find_one({"id": teacher_id})
     if not t:
         raise HTTPException(status_code=404, detail="Teacher not found")
-    if update.name is not None:
-        t.name = update.name
-    if update.institution is not None:
-        t.institution = update.institution
-    if update.subject_specialization is not None:
-        t.subject_specialization = update.subject_specialization
-    db.commit()
-    db.refresh(t)
+    
+    update_fields = {}
+    if update_data.name is not None: update_fields["name"] = update_data.name
+    if update_data.institution is not None: update_fields["institution"] = update_data.institution
+    if update_data.subject_specialization is not None: update_fields["subject_specialization"] = update_data.subject_specialization
+    
+    if update_fields:
+        db.teachers.update_one({"id": teacher_id}, {"$set": update_fields})
+        t.update(update_fields)
     return _teacher_dict(t)
 
 
 # ── Classes ───────────────────────────────────────────────────────────────────
 
 @router.get("/classes/{teacher_id}")
-def get_classes(teacher_id: int, db: Session = Depends(get_db)):
-    classes = db.query(Classroom).filter(Classroom.teacher_id == teacher_id).all()
-    return [_classroom_dict(c) for c in classes]
+def get_classes(teacher_id: int, db = Depends(get_db)):
+    classes = list(db.classrooms.find({"teacher_id": teacher_id}))
+    return [_classroom_dict(c, db) for c in classes]
 
 
 @router.post("/classes")
-def create_class(c: ClassroomCreate, db: Session = Depends(get_db)):
-    new_class = Classroom(
-        name=c.name,
-        subject=c.subject,
-        section=c.section,
-        required_photos=c.required_photos,
-        teacher_id=c.teacher_id,
-    )
-    db.add(new_class)
-    db.commit()
-    db.refresh(new_class)
-    return _classroom_dict(new_class)
+def create_class(c: ClassroomCreate, db = Depends(get_db)):
+    c_id = get_next_id("classrooms")
+    new_class = {
+        "id": c_id,
+        "name": c.name,
+        "subject": c.subject,
+        "section": c.section,
+        "required_photos": c.required_photos,
+        "teacher_id": c.teacher_id,
+    }
+    db.classrooms.insert_one(new_class)
+    return _classroom_dict(new_class, db)
 
 
 @router.put("/classes/{class_id}")
-def update_class(class_id: int, update: ClassroomUpdate, db: Session = Depends(get_db)):
-    c = db.query(Classroom).filter(Classroom.id == class_id).first()
+def update_class(class_id: int, update: ClassroomUpdate, db = Depends(get_db)):
+    c = db.classrooms.find_one({"id": class_id})
     if not c:
         raise HTTPException(status_code=404, detail="Classroom not found")
-    if update.name is not None:
-        c.name = update.name
-    if update.subject is not None:
-        c.subject = update.subject
-    if update.section is not None:
-        c.section = update.section
-    if update.required_photos is not None:
-        c.required_photos = update.required_photos
-    db.commit()
-    db.refresh(c)
-    return _classroom_dict(c)
+    
+    update_fields = {}
+    if update.name is not None: update_fields["name"] = update.name
+    if update.subject is not None: update_fields["subject"] = update.subject
+    if update.section is not None: update_fields["section"] = update.section
+    if update.required_photos is not None: update_fields["required_photos"] = update.required_photos
+    
+    if update_fields:
+        db.classrooms.update_one({"id": class_id}, {"$set": update_fields})
+        c.update(update_fields)
+    return _classroom_dict(c, db)
 
 
 @router.delete("/classes/{class_id}")
-def delete_class(class_id: int, db: Session = Depends(get_db)):
-    c = db.query(Classroom).filter(Classroom.id == class_id).first()
+def delete_class(class_id: int, db = Depends(get_db)):
+    c = db.classrooms.find_one({"id": class_id})
     if not c:
         raise HTTPException(status_code=404, detail="Classroom not found")
-    db.delete(c)
-    db.commit()
+    db.classrooms.delete_one({"id": class_id})
+    # Also clean up students, photos, lecture dates, and attendance records
+    db.students.delete_many({"classroom_id": class_id})
+    db.lecture_dates.delete_many({"classroom_id": class_id})
+    db.attendance_records.delete_many({"classroom_id": class_id})
     return {"status": "deleted", "id": class_id}
 
 
 # ── Students ──────────────────────────────────────────────────────────────────
 
 @router.get("/classes/{class_id}/students")
-def get_students(class_id: int, db: Session = Depends(get_db)):
-    students = (
-        db.query(Student)
-        .filter(Student.classroom_id == class_id)
-        .order_by(Student.roll_number)
-        .all()
-    )
-    return [_student_dict(s) for s in students]
+def get_students(class_id: int, db = Depends(get_db)):
+    students = list(db.students.find({"classroom_id": class_id}).sort("roll_number", 1))
+    return [_student_dict(s, db) for s in students]
 
 
 def _process_student_photos_bg(student_id: int, file_paths: List[str]):
     """Background task: extracts face encodings without blocking the HTTP response or the teacher's app!"""
-    from app.db.database import SessionLocal
-    db = SessionLocal()
+    from app.db.database import db
     try:
-        student = db.query(Student).filter(Student.id == student_id).first()
+        student = db.students.find_one({"id": student_id})
         if not student:
             return
 
-        photo_entries = []
         for path in file_paths:
             enc = extract_face_encoding(path)
-            sp = StudentPhoto(student_id=student_id, photo_path=path, face_encoding=enc)
-            db.add(sp)
-            photo_entries.append(enc)
+            sp_id = get_next_id("student_photos")
+            db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": path, "face_encoding": enc})
 
-        # Merge with existing photos if any
-        all_photos = db.query(StudentPhoto).filter(StudentPhoto.student_id == student_id).all()
-        all_encs = [p.face_encoding for p in all_photos if p.face_encoding]
+        all_photos = list(db.student_photos.find({"student_id": student_id}))
+        all_encs = [p["face_encoding"] for p in all_photos if p.get("face_encoding")]
         avg_enc = merge_encoding_strings(all_encs)
-        student.face_encoding = avg_enc
-        db.commit()
+        db.students.update_one({"id": student_id}, {"$set": {"face_encoding": avg_enc}})
     except Exception as e:
         print(f"Background photo processing error for student {student_id}: {e}")
-    finally:
-        db.close()
 
 
 @router.post("/students")
@@ -258,15 +253,15 @@ def add_student(
     roll_number: str = Form(...),
     classroom_id: int = Form(...),
     photo: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db),
+    db = Depends(get_db),
 ):
     roll_clean = str(roll_number).strip()
-    existing_students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
+    existing_students = list(db.students.find({"classroom_id": classroom_id}))
     for s in existing_students:
-        if str(s.roll_number).strip().lower() == roll_clean.lower():
+        if str(s["roll_number"]).strip().lower() == roll_clean.lower():
             raise HTTPException(
                 status_code=400,
-                detail=f"Duplicate roll number: A student named '{s.name}' with roll number '{roll_clean}' already exists in this class!"
+                detail=f"Duplicate roll number: A student named '{s['name']}' with roll number '{roll_clean}' already exists in this class!"
             )
 
     photo_path = None
@@ -276,21 +271,20 @@ def add_student(
             shutil.copyfileobj(photo.file, buffer)
         photo_path = file_path
 
-    student = Student(
-        name=name.strip(),
-        roll_number=roll_clean,
-        classroom_id=classroom_id,
-        photo_path=photo_path,
-        face_encoding="processing...",
-    )
-    db.add(student)
-    db.commit()
-    db.refresh(student)
+    s_id = get_next_id("students")
+    student = {
+        "id": s_id,
+        "name": name.strip(),
+        "roll_number": roll_clean,
+        "classroom_id": classroom_id,
+        "photo_path": photo_path,
+        "face_encoding": "processing...",
+    }
+    db.students.insert_one(student)
 
     if photo_path:
-        background_tasks.add_task(_process_student_photos_bg, student.id, [photo_path])
-
-    return _student_dict(student)
+        background_tasks.add_task(_process_student_photos_bg, s_id, [photo_path])
+    return _student_dict(student, db)
 
 
 @router.post("/students/batch")
@@ -300,19 +294,19 @@ def add_student_batch(
     roll_number: str = Form(...),
     classroom_id: int = Form(...),
     photos: List[UploadFile] = File(...),
-    db: Session = Depends(get_db),
+    db = Depends(get_db),
 ):
     """Instant bulk enrollment: saves student immediately in 0.05 seconds and processes AI embeddings in the background!"""
     if not photos or len(photos) == 0:
         raise HTTPException(status_code=400, detail="At least 1 photo required")
 
     roll_clean = str(roll_number).strip()
-    existing_students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
+    existing_students = list(db.students.find({"classroom_id": classroom_id}))
     for s in existing_students:
-        if str(s.roll_number).strip().lower() == roll_clean.lower():
+        if str(s["roll_number"]).strip().lower() == roll_clean.lower():
             raise HTTPException(
                 status_code=400,
-                detail=f"Duplicate roll number: A student named '{s.name}' with roll number '{roll_clean}' already exists in this class!"
+                detail=f"Duplicate roll number: A student named '{s['name']}' with roll number '{roll_clean}' already exists in this class!"
             )
 
     file_paths = []
@@ -322,20 +316,19 @@ def add_student_batch(
             shutil.copyfileobj(photo.file, buffer)
         file_paths.append(file_path)
 
-    student = Student(
-        name=name,
-        roll_number=roll_number,
-        classroom_id=classroom_id,
-        photo_path=file_paths[0] if file_paths else None,
-        face_encoding="processing...",
-    )
-    db.add(student)
-    db.commit()
-    db.refresh(student)
+    s_id = get_next_id("students")
+    student = {
+        "id": s_id,
+        "name": name,
+        "roll_number": roll_number,
+        "classroom_id": classroom_id,
+        "photo_path": file_paths[0] if file_paths else None,
+        "face_encoding": "processing...",
+    }
+    db.students.insert_one(student)
 
-    background_tasks.add_task(_process_student_photos_bg, student.id, file_paths)
-
-    return _student_dict(student)
+    background_tasks.add_task(_process_student_photos_bg, s_id, file_paths)
+    return _student_dict(student, db)
 
 
 @router.post("/students/{student_id}/photos")
@@ -343,10 +336,10 @@ def add_student_photo(
     student_id: int,
     background_tasks: BackgroundTasks,
     photo: UploadFile = File(...),
-    db: Session = Depends(get_db),
+    db = Depends(get_db),
 ):
     """Add an additional photo instantly and process embedding asynchronously."""
-    s = db.query(Student).filter(Student.id == student_id).first()
+    s = db.students.find_one({"id": student_id})
     if not s:
         raise HTTPException(status_code=404, detail="Student not found")
 
@@ -354,39 +347,42 @@ def add_student_photo(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(photo.file, buffer)
 
-    if not s.photo_path:
-        s.photo_path = file_path
-        db.commit()
+    if not s.get("photo_path"):
+        db.students.update_one({"id": student_id}, {"$set": {"photo_path": file_path}})
+        s["photo_path"] = file_path
 
     background_tasks.add_task(_process_student_photos_bg, student_id, [file_path])
 
     return {
         "message": "Photo upload started in background",
-        "student": _student_dict(s),
+        "student": _student_dict(s, db),
     }
 
 
 @router.put("/students/{student_id}")
-def update_student(student_id: int, update: StudentUpdate, db: Session = Depends(get_db)):
-    s = db.query(Student).filter(Student.id == student_id).first()
+def update_student(student_id: int, update: StudentUpdate, db = Depends(get_db)):
+    s = db.students.find_one({"id": student_id})
     if not s:
         raise HTTPException(status_code=404, detail="Student not found")
-    if update.name is not None:
-        s.name = update.name
-    if update.roll_number is not None:
-        s.roll_number = update.roll_number
-    db.commit()
-    db.refresh(s)
-    return _student_dict(s)
+    
+    update_fields = {}
+    if update.name is not None: update_fields["name"] = update.name
+    if update.roll_number is not None: update_fields["roll_number"] = update.roll_number
+    
+    if update_fields:
+        db.students.update_one({"id": student_id}, {"$set": update_fields})
+        s.update(update_fields)
+    return _student_dict(s, db)
 
 
 @router.delete("/students/{student_id}")
-def delete_student(student_id: int, db: Session = Depends(get_db)):
-    s = db.query(Student).filter(Student.id == student_id).first()
+def delete_student(student_id: int, db = Depends(get_db)):
+    s = db.students.find_one({"id": student_id})
     if not s:
         raise HTTPException(status_code=404, detail="Student not found")
-    db.delete(s)
-    db.commit()
+    db.students.delete_one({"id": student_id})
+    db.student_photos.delete_many({"student_id": student_id})
+    db.attendance_records.delete_many({"student_id": student_id})
     return {"message": "Student deleted successfully"}
 
 
@@ -419,20 +415,20 @@ def check_photo_quality(photo: UploadFile = File(...)):
 def scan_video(
     classroom_id: int = Form(...),
     video: UploadFile = File(...),
-    db: Session = Depends(get_db),
+    db = Depends(get_db),
 ):
     video_path = os.path.join(UPLOAD_DIR, f"scan_{classroom_id}_{video.filename}")
     with open(video_path, "wb") as buffer:
         shutil.copyfileobj(video.file, buffer)
 
-    students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
-    encodings = {s.id: s.face_encoding for s in students if s.face_encoding}
-    student_map = {s.id: _student_dict(s) for s in students}
+    students = list(db.students.find({"classroom_id": classroom_id}))
+    encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding")}
+    student_map = {s["id"]: _student_dict(s, db) for s in students}
 
     results = process_classroom_video(video_path, encodings, student_map)
 
-    present_list = [_student_dict(s) for s in students if s.id in results["present_student_ids"]]
-    absent_list  = [_student_dict(s) for s in students if s.id in results["absent_student_ids"]]
+    present_list = [_student_dict(s, db) for s in students if s["id"] in results["present_student_ids"]]
+    absent_list  = [_student_dict(s, db) for s in students if s["id"] in results["absent_student_ids"]]
 
     return {"present_students": present_list, "absent_students": absent_list}
 
@@ -441,14 +437,14 @@ def scan_video(
 async def stream_frame(
     classroom_id: int = Form(...),
     frame: UploadFile = File(...),
-    db: Session = Depends(get_db),
+    db = Depends(get_db),
 ):
     # Optimization #1: Read bytes directly into RAM with zero disk I/O!
     raw_bytes = await frame.read()
 
-    students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
-    encodings = {s.id: s.face_encoding for s in students if s.face_encoding}
-    student_map = {s.id: _student_dict(s) for s in students}
+    students = list(db.students.find({"classroom_id": classroom_id}))
+    encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding")}
+    student_map = {s["id"]: _student_dict(s, db) for s in students}
 
     frame_res = process_single_frame(image_path=None, student_encodings=encodings, student_info=student_map, raw_bytes=raw_bytes)
     if isinstance(frame_res, dict):
@@ -471,17 +467,17 @@ async def stream_frame(
         enriched_boxes.append(fb)
 
     present_list = [student_map[s_id] for s_id in matched_ids if s_id in student_map]
-    all_list = [_student_dict(s) for s in students]
+    all_list = [_student_dict(s, db) for s in students]
     return {"matched_students": present_list, "all_students": all_list, "face_boxes": enriched_boxes}
 
 
 # ── Optimization #3: Persistent WebSocket Streaming Stream ──────────────────────
 @router.websocket("/ws/live_scan/{classroom_id}")
-async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db: Session = Depends(get_db)):
+async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db = Depends(get_db)):
     await websocket.accept()
-    students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
-    encodings = {s.id: s.face_encoding for s in students if s.face_encoding}
-    student_map = {s.id: _student_dict(s) for s in students}
+    students = list(db.students.find({"classroom_id": classroom_id}))
+    encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding")}
+    student_map = {s["id"]: _student_dict(s, db) for s in students}
 
     try:
         while True:
@@ -508,79 +504,78 @@ async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db: Sessi
                 enriched_boxes.append(fb)
 
             present_list = [student_map[s_id] for s_id in matched_ids if s_id in student_map]
-            all_list = [_student_dict(s) for s in students]
+            all_list = [_student_dict(s, db) for s in students]
             await websocket.send_json({"matched_students": present_list, "all_students": all_list, "face_boxes": enriched_boxes})
     except (WebSocketDisconnect, Exception) as e:
         print(f"Live Scan WebSocket disconnected for class {classroom_id}: {e}")
 
 
 @router.post("/attendance/confirm")
-def confirm_attendance(req: AttendanceConfirmRequest, db: Session = Depends(get_db)):
-    ld = db.query(LectureDate).filter(
-        LectureDate.classroom_id == req.classroom_id,
-        LectureDate.date_str == req.date_str,
-    ).first()
+def confirm_attendance(req: AttendanceConfirmRequest, db = Depends(get_db)):
+    ld = db.lecture_dates.find_one({
+        "classroom_id": req.classroom_id,
+        "date_str": req.date_str,
+    })
 
     if not ld:
-        ld = LectureDate(date_str=req.date_str, classroom_id=req.classroom_id)
-        db.add(ld)
-        db.commit()
-        db.refresh(ld)
+        ld_id = get_next_id("lecture_dates")
+        ld = {"id": ld_id, "date_str": req.date_str, "classroom_id": req.classroom_id}
+        db.lecture_dates.insert_one(ld)
     else:
         # Replace existing records for this date
-        db.query(AttendanceRecord).filter(AttendanceRecord.lecture_date_id == ld.id).delete()
+        db.attendance_records.delete_many({"lecture_date_id": ld["id"]})
 
     for s_id in req.present_student_ids:
-        db.add(AttendanceRecord(student_id=s_id, lecture_date_id=ld.id, classroom_id=req.classroom_id, status="P"))
+        a_id = get_next_id("attendance_records")
+        db.attendance_records.insert_one({"id": a_id, "student_id": s_id, "lecture_date_id": ld["id"], "classroom_id": req.classroom_id, "status": "P"})
     for s_id in req.absent_student_ids:
-        db.add(AttendanceRecord(student_id=s_id, lecture_date_id=ld.id, classroom_id=req.classroom_id, status="A"))
+        a_id = get_next_id("attendance_records")
+        db.attendance_records.insert_one({"id": a_id, "student_id": s_id, "lecture_date_id": ld["id"], "classroom_id": req.classroom_id, "status": "A"})
 
-    db.commit()
     excel_path = generate_class_excel(db, req.classroom_id)
     return {"message": "Attendance saved successfully", "excel_path": excel_path}
 
 
 @router.put("/attendance/record")
-def update_attendance_record(req: AttendanceUpdateRequest, db: Session = Depends(get_db)):
+def update_attendance_record(req: AttendanceUpdateRequest, db = Depends(get_db)):
     """Allows teachers to modify past attendance status for a student on any lecture date."""
-    student = db.query(Student).filter(Student.id == req.student_id).first()
+    student = db.students.find_one({"id": req.student_id})
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    ld = db.query(LectureDate).filter(
-        LectureDate.classroom_id == student.classroom_id,
-        LectureDate.date_str == req.date_str,
-    ).first()
+    ld = db.lecture_dates.find_one({
+        "classroom_id": student["classroom_id"],
+        "date_str": req.date_str,
+    })
 
     if not ld:
-        ld = LectureDate(date_str=req.date_str, classroom_id=student.classroom_id)
-        db.add(ld)
-        db.commit()
-        db.refresh(ld)
+        ld_id = get_next_id("lecture_dates")
+        ld = {"id": ld_id, "date_str": req.date_str, "classroom_id": student["classroom_id"]}
+        db.lecture_dates.insert_one(ld)
 
-    record = db.query(AttendanceRecord).filter(
-        AttendanceRecord.student_id == req.student_id,
-        AttendanceRecord.lecture_date_id == ld.id,
-    ).first()
+    record = db.attendance_records.find_one({
+        "student_id": req.student_id,
+        "lecture_date_id": ld["id"],
+    })
 
     if req.status in ["P", "A"]:
         if record:
-            record.status = req.status
+            db.attendance_records.update_one({"id": record["id"]}, {"$set": {"status": req.status}})
         else:
-            db.add(AttendanceRecord(student_id=req.student_id, lecture_date_id=ld.id, classroom_id=student.classroom_id, status=req.status))
+            a_id = get_next_id("attendance_records")
+            db.attendance_records.insert_one({"id": a_id, "student_id": req.student_id, "lecture_date_id": ld["id"], "classroom_id": student["classroom_id"], "status": req.status})
     else:
         if record:
-            db.delete(record)
+            db.attendance_records.delete_one({"id": record["id"]})
 
-    db.commit()
-    excel_path = generate_class_excel(db, student.classroom_id)
+    excel_path = generate_class_excel(db, student["classroom_id"])
     return {"message": "Record updated successfully", "excel_path": excel_path}
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────
 
 @router.get("/reports/class/{class_id}/excel")
-def download_excel(class_id: int, db: Session = Depends(get_db)):
+def download_excel(class_id: int, db = Depends(get_db)):
     try:
         file_path = generate_class_excel(db, class_id)
         return FileResponse(
@@ -595,29 +590,24 @@ def download_excel(class_id: int, db: Session = Depends(get_db)):
 # ── Analytics ─────────────────────────────────────────────────────────────────
 
 @router.get("/analytics/class/{class_id}")
-def get_class_analytics(class_id: int, db: Session = Depends(get_db)):
-    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+def get_class_analytics(class_id: int, db = Depends(get_db)):
+    classroom = db.classrooms.find_one({"id": class_id})
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
-    students      = db.query(Student).filter(Student.classroom_id == class_id).all()
-    lecture_dates = (
-        db.query(LectureDate)
-        .filter(LectureDate.classroom_id == class_id)
-        .order_by(LectureDate.date_str)
-        .all()
-    )
-    records    = db.query(AttendanceRecord).filter(AttendanceRecord.classroom_id == class_id).all()
-    status_map = {(r.student_id, r.lecture_date_id): r.status for r in records}
+    students      = list(db.students.find({"classroom_id": class_id}))
+    lecture_dates = list(db.lecture_dates.find({"classroom_id": class_id}).sort("date_str", 1))
+    records    = list(db.attendance_records.find({"classroom_id": class_id}))
+    status_map = {(r["student_id"], r["lecture_date_id"]): r["status"] for r in records}
     total_students = len(students)
     total_lectures = len(lecture_dates)
 
     # Per-date totals
     date_summaries = []
     for ld in lecture_dates:
-        present = sum(1 for s in students if status_map.get((s.id, ld.id)) == "P")
+        present = sum(1 for s in students if status_map.get((s["id"], ld["id"])) == "P")
         date_summaries.append({
-            "date": ld.date_str,
+            "date": ld["date_str"],
             "present": present,
             "absent": total_students - present,
             "percentage": round(present / total_students * 100, 1) if total_students > 0 else 0.0,
@@ -629,16 +619,16 @@ def get_class_analytics(class_id: int, db: Session = Depends(get_db)):
         present = 0
         history = []
         for ld in lecture_dates:
-            status = status_map.get((s.id, ld.id), "A")
+            status = status_map.get((s["id"], ld["id"]), "A")
             if status == "P":
                 present += 1
             history.append({
-                "date": ld.date_str,
+                "date": ld["date_str"],
                 "status": status if status in ("P", "A", "L") else "A"
             })
         pct = round(present / total_lectures * 100, 1) if total_lectures > 0 else 0.0
         student_summaries.append({
-            "id": s.id, "name": s.name, "roll_number": s.roll_number,
+            "id": s["id"], "name": s["name"], "roll_number": s["roll_number"],
             "present": present, "absent": total_lectures - present,
             "total": total_lectures, "percentage": pct, "history": history,
         })
@@ -650,9 +640,9 @@ def get_class_analytics(class_id: int, db: Session = Depends(get_db)):
     )
 
     return {
-        "classroom_name": classroom.name,
-        "subject": classroom.subject,
-        "section": classroom.section,
+        "classroom_name": classroom["name"],
+        "subject": classroom["subject"],
+        "section": classroom.get("section"),
         "total_students": total_students,
         "total_lectures": total_lectures,
         "overall_avg_percentage": avg_pct,
@@ -662,27 +652,22 @@ def get_class_analytics(class_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/analytics/student/{student_id}")
-def get_student_analytics(student_id: int, db: Session = Depends(get_db)):
-    s = db.query(Student).filter(Student.id == student_id).first()
+def get_student_analytics(student_id: int, db = Depends(get_db)):
+    s = db.students.find_one({"id": student_id})
     if not s:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    lecture_dates = (
-        db.query(LectureDate)
-        .filter(LectureDate.classroom_id == s.classroom_id)
-        .order_by(LectureDate.date_str)
-        .all()
-    )
-    records    = db.query(AttendanceRecord).filter(AttendanceRecord.student_id == student_id).all()
-    status_map = {r.lecture_date_id: r.status for r in records}
+    lecture_dates = list(db.lecture_dates.find({"classroom_id": s["classroom_id"]}).sort("date_str", 1))
+    records    = list(db.attendance_records.find({"student_id": student_id}))
+    status_map = {r["lecture_date_id"]: r["status"] for r in records}
 
-    history = [{"date": ld.date_str, "status": status_map.get(ld.id, "-")} for ld in lecture_dates]
+    history = [{"date": ld["date_str"], "status": status_map.get(ld["id"], "-")} for ld in lecture_dates]
     present = sum(1 for h in history if h["status"] == "P")
     total   = len(history)
     pct     = round(present / total * 100, 1) if total > 0 else 0.0
 
     return {
-        "id": s.id, "name": s.name, "roll_number": s.roll_number,
+        "id": s["id"], "name": s["name"], "roll_number": s["roll_number"],
         "present": present, "absent": total - present,
         "total": total, "percentage": pct, "history": history,
     }

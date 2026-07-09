@@ -1,23 +1,24 @@
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from pymongo import MongoClient
 
-if os.path.exists("/data"):
-    DB_DIR = "/data/db"
-else:
-    DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../data")
-os.makedirs(DB_DIR, exist_ok=True)
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{os.path.join(DB_DIR, 'attendlens.db')}"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+# MongoDB Atlas Connection String
+MONGO_URI = os.getenv(
+    "MONGO_URI",
+    "mongodb+srv://yuvaankaarthikeyaa1206_db_user:aykal_1206@attendlens.riy59cn.mongodb.net/?appName=Attendlens"
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+
+client = MongoClient(MONGO_URI)
+db = client.get_database("attendlens")
 
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    yield db
+
+def get_next_id(collection_name: str) -> int:
+    """Auto-increment sequence generator for clean integer IDs (like SQL id column)."""
+    counter = db.counters.find_one_and_update(
+        {"_id": collection_name},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=True
+    )
+    return counter["seq"]
