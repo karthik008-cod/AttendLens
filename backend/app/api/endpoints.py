@@ -217,7 +217,7 @@ def delete_class(class_id: int, db = Depends(get_db)):
     return {"status": "deleted", "id": class_id}
 
 
-# ── Students ──────────────────────────────────────────────────────────────────
+# ── Students ────────────────────────────────────────────────────────────────
 
 @router.get("/classes/{class_id}/students")
 def get_students(class_id: int, db = Depends(get_db)):
@@ -226,7 +226,6 @@ def get_students(class_id: int, db = Depends(get_db)):
 
 
 def _process_student_photos_bg(student_id: int, file_paths: List[str]):
-    """Background task: extracts face encodings without blocking the HTTP response or the teacher's app!"""
     from app.db.database import db
     try:
         student = db.students.find_one({"id": student_id})
@@ -234,14 +233,22 @@ def _process_student_photos_bg(student_id: int, file_paths: List[str]):
             return
 
         for path in file_paths:
-            enc = extract_face_encoding(path)
-            sp_id = get_next_id("student_photos")
-            db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": path, "face_encoding": enc})
+            try:
+                enc = extract_face_encoding(path)
+                existing = db.student_photos.find_one({"student_id": student_id, "photo_path": path})
+                if existing:
+                    db.student_photos.update_one({"id": existing["id"]}, {"$set": {"face_encoding": enc}})
+                else:
+                    sp_id = get_next_id("student_photos")
+                    db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": path, "face_encoding": enc})
+            except Exception as e:
+                print(f"Error processing individual photo {path}: {e}")
 
         all_photos = list(db.student_photos.find({"student_id": student_id}))
-        all_encs = [p["face_encoding"] for p in all_photos if p.get("face_encoding")]
-        avg_enc = merge_encoding_strings(all_encs)
-        db.students.update_one({"id": student_id}, {"$set": {"face_encoding": avg_enc}})
+        all_encs = [p["face_encoding"] for p in all_photos if p.get("face_encoding") and p.get("face_encoding") != "processing..."]
+        if all_encs:
+            avg_enc = merge_encoding_strings(all_encs)
+            db.students.update_one({"id": student_id}, {"$set": {"face_encoding": avg_enc}})
     except Exception as e:
         print(f"Background photo processing error for student {student_id}: {e}")
 
@@ -286,6 +293,8 @@ async def add_student(
     db.students.insert_one(student)
 
     if photo_path:
+        sp_id = get_next_id("student_photos")
+        db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": photo_path, "face_encoding": "processing..."})
         background_tasks.add_task(_process_student_photos_bg, s_id, [photo_path])
     return _student_dict(student, db)
 
@@ -333,6 +342,10 @@ async def add_student_batch(
     }
     db.students.insert_one(student)
 
+    for path in file_paths:
+        sp_id = get_next_id("student_photos")
+        db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": path, "face_encoding": "processing..."})
+
     background_tasks.add_task(_process_student_photos_bg, s_id, file_paths)
     return _student_dict(student, db)
 
@@ -359,6 +372,9 @@ async def add_student_photo(
     if not s.get("photo_path"):
         db.students.update_one({"id": student_id}, {"$set": {"photo_path": file_path}})
         s["photo_path"] = file_path
+
+    sp_id = get_next_id("student_photos")
+    db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": file_path, "face_encoding": "processing..."})
 
     background_tasks.add_task(_process_student_photos_bg, student_id, [file_path])
 
