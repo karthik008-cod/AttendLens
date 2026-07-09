@@ -2,7 +2,10 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../data")
+if os.path.exists("/data"):
+    DB_DIR = "/data/db"
+else:
+    DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../data")
 os.makedirs(DB_DIR, exist_ok=True)
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{os.path.join(DB_DIR, 'attendlens.db')}"
 

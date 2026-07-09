@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class ApiService {
-  static String baseUrl = 'http://127.0.0.1:8000/api';
+  static String baseUrl = 'https://yuvaankaarthikeyaa-attendlens-backend.hf.space/api';
   static WebSocketChannel? _liveWsChannel;
 
   static WebSocketChannel connectLiveScanWs(int classroomId) {
