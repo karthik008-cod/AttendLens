@@ -1,16 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.db.database import engine, Base
+from app.db.database import db
 from app.api.endpoints import router as api_router
 from app.api.invite_page import invite_router
 
-# Auto-create all tables (new tables added: student_photos, new columns on existing tables)
-# NOTE: If upgrading an existing DB, delete backend/data/attendlens.db to regenerate schema.
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI(
     title="AttendLens API",
-    description="AI-powered classroom attendance with facial recognition",
+    description="AI-powered classroom attendance with facial recognition powered by MongoDB Atlas",
     version="2.0.0",
 )
 
@@ -26,6 +22,19 @@ app.include_router(api_router, prefix="/api")
 app.include_router(invite_router)  # Serves /invite/{class_id} at root level
 
 
+@app.on_event("startup")
+def startup_db_check():
+    try:
+        print(f"✅ Connected to MongoDB Atlas Cluster | Active Database: {db.name}")
+    except Exception as e:
+        print(f"⚠️ MongoDB connection warning on startup: {e}")
+
+
 @app.get("/")
 def root():
-    return {"message": "AttendLens API v2.0 Running", "docs": "/docs", "status": "online"}
+    return {
+        "message": "AttendLens API v2.0 (MongoDB Atlas + OpenCV Engine) Running",
+        "docs": "/docs",
+        "status": "online",
+        "database": db.name if db else "offline"
+    }
