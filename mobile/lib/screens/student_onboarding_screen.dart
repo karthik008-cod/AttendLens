@@ -113,7 +113,13 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                       final photo = photos[i];
                       return GestureDetector(
                         onTap: () async {
-                          final picked = await _picker.pickImage(source: ImageSource.camera, preferredCameraDevice: CameraDevice.front, imageQuality: 85);
+                          final picked = await _picker.pickImage(
+                            source: ImageSource.camera,
+                            preferredCameraDevice: CameraDevice.front,
+                            maxWidth: 800,
+                            maxHeight: 800,
+                            imageQuality: 75,
+                          );
                           if (picked != null) {
                             final file = File(picked.path);
                             setModal(() {

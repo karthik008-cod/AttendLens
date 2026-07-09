@@ -247,7 +247,7 @@ def _process_student_photos_bg(student_id: int, file_paths: List[str]):
 
 
 @router.post("/students")
-def add_student(
+async def add_student(
     background_tasks: BackgroundTasks,
     name: str = Form(...),
     roll_number: str = Form(...),
@@ -266,9 +266,12 @@ def add_student(
 
     photo_path = None
     if photo:
-        file_path = os.path.join(UPLOAD_DIR, f"student_{roll_number}_{photo.filename}")
+        safe_fname = os.path.basename(photo.filename or "photo.jpg")
+        file_path = os.path.join(UPLOAD_DIR, f"student_{roll_number}_{safe_fname}")
+        content = await photo.read()
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(photo.file, buffer)
+            buffer.write(content)
+        await photo.close()
         photo_path = file_path
 
     s_id = get_next_id("students")
@@ -288,7 +291,7 @@ def add_student(
 
 
 @router.post("/students/batch")
-def add_student_batch(
+async def add_student_batch(
     background_tasks: BackgroundTasks,
     name: str = Form(...),
     roll_number: str = Form(...),
@@ -311,9 +314,12 @@ def add_student_batch(
 
     file_paths = []
     for idx, photo in enumerate(photos):
-        file_path = os.path.join(UPLOAD_DIR, f"student_{roll_number}_{idx+1}_{photo.filename}")
+        safe_fname = os.path.basename(photo.filename or f"photo_{idx}.jpg")
+        file_path = os.path.join(UPLOAD_DIR, f"student_{roll_number}_{idx+1}_{safe_fname}")
+        content = await photo.read()
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(photo.file, buffer)
+            buffer.write(content)
+        await photo.close()
         file_paths.append(file_path)
 
     s_id = get_next_id("students")
@@ -332,7 +338,7 @@ def add_student_batch(
 
 
 @router.post("/students/{student_id}/photos")
-def add_student_photo(
+async def add_student_photo(
     student_id: int,
     background_tasks: BackgroundTasks,
     photo: UploadFile = File(...),
@@ -343,9 +349,12 @@ def add_student_photo(
     if not s:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    file_path = os.path.join(UPLOAD_DIR, f"student_{student_id}_extra_{photo.filename}")
+    safe_fname = os.path.basename(photo.filename or "extra.jpg")
+    file_path = os.path.join(UPLOAD_DIR, f"student_{student_id}_extra_{safe_fname}")
+    content = await photo.read()
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(photo.file, buffer)
+        buffer.write(content)
+    await photo.close()
 
     if not s.get("photo_path"):
         db.students.update_one({"id": student_id}, {"$set": {"photo_path": file_path}})

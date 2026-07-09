@@ -180,7 +180,7 @@ class ApiService {
     if (photo != null && await photo.exists()) {
       request.files.add(await http.MultipartFile.fromPath('photo', photo.path));
     }
-    final streamed = await request.send();
+    final streamed = await request.send().timeout(const Duration(seconds: 60));
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) return json.decode(res.body);
     try {
@@ -207,7 +207,7 @@ class ApiService {
         request.files.add(await http.MultipartFile.fromPath('photos', photo.path));
       }
     }
-    final streamed = await request.send();
+    final streamed = await request.send().timeout(const Duration(seconds: 60));
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) return json.decode(res.body);
     try {
@@ -223,7 +223,7 @@ class ApiService {
     var request = http.MultipartRequest(
         'POST', Uri.parse('$baseUrl/students/$studentId/photos'));
     request.files.add(await http.MultipartFile.fromPath('photo', photo.path));
-    final streamed = await request.send();
+    final streamed = await request.send().timeout(const Duration(seconds: 60));
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode != 200) throw Exception('Failed to upload photo');
   }
