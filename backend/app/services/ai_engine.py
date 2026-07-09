@@ -1,18 +1,31 @@
 import os
+# Memory optimizations for cloud free tiers (Render 512MB limit)
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 import json
 import cv2
 import numpy as np
 
-try:
-    from deepface import DeepFace
-    DEEPFACE_AVAILABLE = True
-except ImportError:
-    DEEPFACE_AVAILABLE = False
+_deepface_instance = None
+
+def get_deepface():
+    """Lazily load DeepFace only when first needed so server boots under 65MB RAM."""
+    global _deepface_instance
+    if _deepface_instance is None:
+        try:
+            from deepface import DeepFace
+            _deepface_instance = DeepFace
+        except ImportError:
+            _deepface_instance = False
+    return _deepface_instance if _deepface_instance is not False else None
 
 
 def extract_face_encoding(image_path: str) -> str:
     """Extracts a face embedding from a single image. Returns JSON string."""
-    if not DEEPFACE_AVAILABLE or not os.path.exists(image_path):
+    DeepFace = get_deepface()
+    if not DeepFace or not os.path.exists(image_path):
         return json.dumps(np.zeros(128).tolist())
 
     try:
@@ -234,7 +247,8 @@ def process_classroom_video(video_path: str, student_encodings: dict) -> dict:
         temp_frame_path = video_path + f"_temp_{frame_count}.jpg"
         cv2.imwrite(temp_frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
-        if DEEPFACE_AVAILABLE:
+        DeepFace = get_deepface()
+        if DeepFace:
             try:
                 frame_faces = []
                 try:
@@ -392,7 +406,8 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
         norms = np.linalg.norm(S, axis=1, keepdims=True) + 1e-9
         student_matrix = S / norms
 
-    if DEEPFACE_AVAILABLE:
+    DeepFace = get_deepface()
+    if DeepFace:
         try:
             frame_faces = []
             try:
