@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite
+attend_lens.db
+uploads/*
+!uploads/.gitkeep
+.env
+.venv/
+venv/
+*.log
+.DS_Store
