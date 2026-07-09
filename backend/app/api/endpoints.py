@@ -1,7 +1,7 @@
 import os
 import shutil
 from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -435,20 +435,19 @@ def scan_video(
 
 
 @router.post("/attendance/stream-frame")
-def stream_frame(
+async def stream_frame(
     classroom_id: int = Form(...),
     frame: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    frame_path = os.path.join(UPLOAD_DIR, f"live_{classroom_id}_{frame.filename}")
-    with open(frame_path, "wb") as buffer:
-        shutil.copyfileobj(frame.file, buffer)
+    # Optimization #1: Read bytes directly into RAM with zero disk I/O!
+    raw_bytes = await frame.read()
 
     students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
     encodings = {s.id: s.face_encoding for s in students if s.face_encoding}
     student_map = {s.id: _student_dict(s) for s in students}
 
-    frame_res = process_single_frame(frame_path, encodings, student_map)
+    frame_res = process_single_frame(image_path=None, student_encodings=encodings, student_info=student_map, raw_bytes=raw_bytes)
     if isinstance(frame_res, dict):
         matched_ids = set(frame_res.get("matched_ids", []))
         face_boxes = frame_res.get("face_boxes", [])
@@ -471,6 +470,45 @@ def stream_frame(
     present_list = [student_map[s_id] for s_id in matched_ids if s_id in student_map]
     all_list = [_student_dict(s) for s in students]
     return {"matched_students": present_list, "all_students": all_list, "face_boxes": enriched_boxes}
+
+
+# ── Optimization #3: Persistent WebSocket Streaming Stream ──────────────────────
+@router.websocket("/ws/live_scan/{classroom_id}")
+async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db: Session = Depends(get_db)):
+    await websocket.accept()
+    students = db.query(Student).filter(Student.classroom_id == classroom_id).all()
+    encodings = {s.id: s.face_encoding for s in students if s.face_encoding}
+    student_map = {s.id: _student_dict(s) for s in students}
+
+    try:
+        while True:
+            raw_bytes = await websocket.receive_bytes()
+            if not raw_bytes:
+                continue
+            frame_res = process_single_frame(image_path=None, student_encodings=encodings, student_info=student_map, raw_bytes=raw_bytes)
+            if isinstance(frame_res, dict):
+                matched_ids = set(frame_res.get("matched_ids", []))
+                face_boxes = frame_res.get("face_boxes", [])
+            else:
+                matched_ids = set(frame_res)
+                face_boxes = []
+
+            enriched_boxes = []
+            for fb in face_boxes:
+                s_id = fb.get("id")
+                if s_id in student_map:
+                    fb["name"] = student_map[s_id]["name"]
+                    fb["roll_number"] = student_map[s_id]["roll_number"]
+                else:
+                    fb["name"] = "Scanning / Unrecognized"
+                    fb["roll_number"] = "?"
+                enriched_boxes.append(fb)
+
+            present_list = [student_map[s_id] for s_id in matched_ids if s_id in student_map]
+            all_list = [_student_dict(s) for s in students]
+            await websocket.send_json({"matched_students": present_list, "all_students": all_list, "face_boxes": enriched_boxes})
+    except (WebSocketDisconnect, Exception) as e:
+        print(f"Live Scan WebSocket disconnected for class {classroom_id}: {e}")
 
 
 @router.post("/attendance/confirm")

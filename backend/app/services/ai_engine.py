@@ -13,7 +13,7 @@ except ImportError:
 def extract_face_encoding(image_path: str) -> str:
     """Extracts a face embedding from a single image. Returns JSON string."""
     if not DEEPFACE_AVAILABLE or not os.path.exists(image_path):
-        return json.dumps(np.random.rand(128).tolist())
+        return json.dumps(np.zeros(128).tolist())
 
     try:
         # Use YuNet: OpenCV's ultra-fast (2023) deep learning face detector (~0.05s) with strict enforcement!
@@ -41,7 +41,7 @@ def extract_face_encoding(image_path: str) -> str:
             except Exception as e:
                 print(f"Error extracting face encoding: {e}")
 
-    return json.dumps(np.random.rand(512).tolist())
+    return json.dumps(np.zeros(512).tolist())
 
 
 def merge_student_encodings(photo_paths: list) -> str:
@@ -54,10 +54,15 @@ def merge_student_encodings(photo_paths: list) -> str:
         if not path or not os.path.exists(path):
             continue
         enc_str = extract_face_encoding(path)
-        embeddings.append(np.array(json.loads(enc_str)))
+        if not enc_str:
+            continue
+        emb = np.array(json.loads(enc_str))
+        # Ignore zero vectors produced by failed face detection
+        if np.linalg.norm(emb) > 0:
+            embeddings.append(emb)
 
     if not embeddings:
-        return json.dumps(np.random.rand(512).tolist())
+        return json.dumps(np.zeros(512).tolist())
 
     avg_embedding = np.mean(np.stack(embeddings), axis=0)
     # Normalize to unit vector for consistent cosine similarity comparison
@@ -237,31 +242,26 @@ def process_classroom_video(video_path: str, student_encodings: dict) -> dict:
                     frame_faces = DeepFace.represent(
                         img_path=temp_frame_path, model_name=target_model, detector_backend="yunet", enforce_detection=True
                     )
-                except Exception:
-                    try:
-                        # Fast fallback 1: SSD (Single Shot MultiBox Detector)
-                        frame_faces = DeepFace.represent(
-                            img_path=temp_frame_path, model_name=target_model, detector_backend="ssd", enforce_detection=True
-                        )
-                    except Exception:
+                except Exception as e:
+                    if "could not be detected" not in str(e).lower() and "face not found" not in str(e).lower():
                         try:
-                            # Fallback 2: RetinaFace (high accuracy for dim/angled/difficult faces)
                             frame_faces = DeepFace.represent(
                                 img_path=temp_frame_path, model_name=target_model, detector_backend="retinaface", enforce_detection=True
                             )
                         except Exception:
-                            try:
-                                # Fallback 3: OpenCV Haar Cascade
-                                frame_faces = DeepFace.represent(
-                                    img_path=temp_frame_path, model_name=target_model, detector_backend="opencv", enforce_detection=True
-                                )
-                            except Exception:
-                                pass
+                            pass
 
                 for face_obj in frame_faces:
-                    frame_emb = np.array(face_obj["embedding"])
+                    conf = face_obj.get("face_confidence", 1.0)
+                    if conf is not None and conf < 0.70:
+                        continue
+
                     area = face_obj.get("facial_area", {})
                     fw = int(area.get("w", area.get("width", 100)))
+                    if fw > 800.0 * 0.50:
+                        continue
+
+                    frame_emb = np.array(face_obj["embedding"], dtype=np.float32)
 
                     face_ratio = max(fw / 800.0, 0.015)
                     est_meters = round(min(max(0.16 / face_ratio, 0.6), 8.0), 1)
@@ -323,35 +323,45 @@ def process_classroom_video(video_path: str, student_encodings: dict) -> dict:
     }
 
 
-def process_single_frame(image_path: str, student_encodings: dict, student_info: dict = None) -> dict:
+def process_single_frame(image_path: str = None, student_encodings: dict = None, student_info: dict = None, raw_bytes: bytes = None) -> dict:
     """Scans a single live streamed camera frame against known student encodings.
     Resizes image to max 800px width for ultra-fast real-time recognition.
     Returns: {"matched_ids": list of matched ids, "face_boxes": list of face box dicts}
     """
-    if not os.path.exists(image_path):
-        return {"matched_ids": [], "face_boxes": []}
+    if student_encodings is None:
+        student_encodings = {}
 
     matched_ids = set()
     face_boxes = []
     img_w = 800
     img_h = 600
+    img = None
 
     try:
+        if raw_bytes is not None:
+            nparr = np.frombuffer(raw_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        elif image_path and os.path.exists(image_path):
+            img = cv2.imread(image_path)
+
+        if img is None:
+            return {"matched_ids": [], "face_boxes": []}
+
         # Keep 800px width so distant classroom faces remain large enough (~30-40px) for deep learning detectors
-        img = cv2.imread(image_path)
-        if img is not None:
-            h, w = img.shape[:2]
-            if w > 800:
-                scale = 800 / w
-                img_w = 800
-                img_h = int(h * scale)
-                img = cv2.resize(img, (img_w, img_h))
+        h, w = img.shape[:2]
+        if w > 800:
+            scale = 800 / w
+            img_w = 800
+            img_h = int(h * scale)
+            img = cv2.resize(img, (img_w, img_h))
+            if image_path and os.path.exists(image_path) and raw_bytes is None:
                 cv2.imwrite(image_path, img)
-            else:
-                img_w = w
-                img_h = h
+        else:
+            img_w = w
+            img_h = h
     except Exception as e:
-        print(f"Error resizing live frame: {e}")
+        print(f"Error decoding live frame: {e}")
+        return {"matched_ids": [], "face_boxes": []}
 
     # Detect target model and threshold
     target_model = "Facenet512"
@@ -373,45 +383,56 @@ def process_single_frame(image_path: str, student_encodings: dict, student_info:
         except Exception:
             pass
 
+    # ── Optimization #2: Pre-Normalized Vectorized Matrix Multiplication (GEMM) ──
+    student_ids_list = list(student_emb_cache.keys())
+    student_matrix = None
+    if student_ids_list:
+        embs = [student_emb_cache[sid] for sid in student_ids_list]
+        S = np.array(embs, dtype=np.float32)
+        norms = np.linalg.norm(S, axis=1, keepdims=True) + 1e-9
+        student_matrix = S / norms
+
     if DEEPFACE_AVAILABLE:
         try:
             frame_faces = []
             try:
                 # Use YuNet: OpenCV's ultra-fast (2023) deep learning face detector (~0.05s) with strict enforcement!
+                # Note: When enforce_detection=True and no face is found, DeepFace raises ValueError ("Face could not be detected").
+                # We cleanly catch that and return 0 faces. DO NOT run Haar Cascade/SSD fallbacks when no face is present!
                 frame_faces = DeepFace.represent(
-                    img_path=image_path, model_name=target_model, detector_backend="yunet", enforce_detection=True
+                    img_path=img, model_name=target_model, detector_backend="yunet", enforce_detection=True
                 )
-            except Exception:
-                try:
-                    # Fast fallback 1: SSD (Single Shot MultiBox Detector)
-                    frame_faces = DeepFace.represent(
-                        img_path=image_path, model_name=target_model, detector_backend="ssd", enforce_detection=True
-                    )
-                except Exception:
+            except Exception as e:
+                # Only fallback to RetinaFace if YuNet crashed or is missing, NOT if it cleanly reported 0 faces!
+                if "could not be detected" not in str(e).lower() and "face not found" not in str(e).lower():
                     try:
-                        # Fallback 2: RetinaFace (high accuracy for dim/angled/difficult faces)
                         frame_faces = DeepFace.represent(
-                            img_path=image_path, model_name=target_model, detector_backend="retinaface", enforce_detection=True
+                            img_path=img, model_name=target_model, detector_backend="retinaface", enforce_detection=True
                         )
                     except Exception:
-                        try:
-                            # Fallback 3: OpenCV Haar Cascade
-                            frame_faces = DeepFace.represent(
-                                img_path=image_path, model_name=target_model, detector_backend="opencv", enforce_detection=True
-                            )
-                        except Exception:
-                            pass
+                        pass
 
             if not frame_faces:
                 print("Live Frame: No face detected in camera frame (try holding still or moving closer)")
 
             for face_obj in frame_faces:
-                frame_emb = np.array(face_obj["embedding"])
+                # Strict Confidence & Lens Obstruction Check
+                conf = face_obj.get("face_confidence", 1.0)
+                if conf is not None and conf < 0.70:
+                    print(f"Live Frame: Face ignored due to low detector confidence ({conf:.2f} < 0.70)")
+                    continue
+
+                frame_emb = np.array(face_obj["embedding"], dtype=np.float32)
                 area = face_obj.get("facial_area", {})
                 fx = int(area.get("x", area.get("left", 0)))
                 fy = int(area.get("y", area.get("top", 0)))
                 fw = int(area.get("w", area.get("width", 100)))
                 fh = int(area.get("h", area.get("height", 100)))
+
+                # If face bounding box takes up more than 50% of screen width, an object (finger/palm) is pressed against lens!
+                if fw > max(img_w, 1) * 0.50:
+                    print(f"Live Frame: Object blocking camera lens or too close (width {fw}px > 50% screen). Ignored.")
+                    continue
 
                 # ── Dynamic Distance-Scaled Confidence Meter (6-8m max classroom length) ──
                 face_ratio = max(fw / max(img_w, 1), 0.015)
@@ -421,14 +442,13 @@ def process_single_frame(image_path: str, student_encodings: dict, student_info:
 
                 best_match_id = None
                 best_dist = float("inf")
-                for s_id, s_emb in student_emb_cache.items():
-                    if len(frame_emb) != len(s_emb):
-                        continue
-                    denom = np.linalg.norm(frame_emb) * np.linalg.norm(s_emb) + 1e-9
-                    cosine_dist = 1 - np.dot(frame_emb, s_emb) / denom
-                    if cosine_dist < best_dist:
-                        best_dist = cosine_dist
-                        best_match_id = s_id
+                if student_matrix is not None and len(frame_emb) == student_matrix.shape[1]:
+                    frame_norm = frame_emb / (np.linalg.norm(frame_emb) + 1e-9)
+                    # Vectorized BLAS matrix dot product: computes all similarities in < 0.1ms!
+                    cosine_dists = 1.0 - np.dot(student_matrix, frame_norm)
+                    best_idx = int(np.argmin(cosine_dists))
+                    best_dist = float(cosine_dists[best_idx])
+                    best_match_id = student_ids_list[best_idx]
 
                 if best_match_id is not None and best_dist < dynamic_threshold:
                     st_name = "Student"

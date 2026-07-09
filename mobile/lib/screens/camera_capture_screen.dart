@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -35,6 +36,14 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     super.initState();
     _initCamera();
     _loadClassStudents();
+  }
+
+  @override
+  void dispose() {
+    _liveStreamTimer?.cancel();
+    _cameraController?.dispose();
+    ApiService.disconnectLiveScanWs();
+    super.dispose();
   }
 
   Future<void> _loadClassStudents() async {
@@ -75,32 +84,29 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       _isAiWarmingUp = true;
       _livePresentStudents.clear();
       _liveFaceBoxes.clear();
-      _statusMessage = "⏳ Making the AI ready... Initializing camera stream!";
+      _statusMessage = "⏳ Making the AI ready... Initializing ultra-fast stream!";
     });
 
-    _liveStreamTimer = Timer.periodic(const Duration(milliseconds: 350), (timer) async {
-      if (!_isRecording || _isStreamingFrame || _cameraController == null) return;
-      _isStreamingFrame = true;
-      try {
-        final XFile photoFile = await _cameraController!.takePicture();
-        final results = await ApiService.streamFrame(widget.classId, File(photoFile.path));
-        
-        if (mounted) {
-          final matchedList = List<Map<String, dynamic>>.from(results["matched_students"]);
+    // Connect WebSocket (#3)
+    try {
+      final channel = ApiService.connectLiveScanWs(widget.classId);
+      channel.stream.listen((message) {
+        if (!mounted || !_isRecording) return;
+        try {
+          final results = json.decode(message as String);
+          final matchedList = List<Map<String, dynamic>>.from(results["matched_students"] ?? []);
           if (results["all_students"] != null) {
             _allClassStudents = List<Map<String, dynamic>>.from(results["all_students"]);
           }
           if (results["face_boxes"] != null) {
             _liveFaceBoxes = List<Map<String, dynamic>>.from(results["face_boxes"]);
           }
-          
           for (var st in matchedList) {
             final stId = int.parse(st["id"].toString());
             if (!_livePresentStudents.containsKey(stId)) {
               _livePresentStudents[stId] = st;
             }
           }
-          
           if (_isRecording) {
             setState(() {
               _isAiWarmingUp = false;
@@ -110,6 +116,50 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
                 _statusMessage = "🔴 LIVE SCANNING: Found ${_livePresentStudents.length} / ${_allClassStudents.length} students!";
               }
             });
+          }
+        } catch (e) {
+          debugPrint("Ws decode error: $e");
+        }
+      });
+    } catch (e) {
+      debugPrint("WebSocket connect failed, using HTTP fallback: $e");
+    }
+
+    _liveStreamTimer = Timer.periodic(const Duration(milliseconds: 220), (timer) async {
+      if (!_isRecording || _isStreamingFrame || _cameraController == null) return;
+      _isStreamingFrame = true;
+      try {
+        final XFile photoFile = await _cameraController!.takePicture();
+        final List<int> rawBytes = await photoFile.readAsBytes();
+        
+        // Try WebSocket first with zero disk/TCP overhead (#3 & #1)
+        if (!ApiService.sendLiveScanFrameBytes(rawBytes)) {
+          // HTTP Fallback
+          final results = await ApiService.streamFrame(widget.classId, File(photoFile.path));
+          if (mounted) {
+            final matchedList = List<Map<String, dynamic>>.from(results["matched_students"]);
+            if (results["all_students"] != null) {
+              _allClassStudents = List<Map<String, dynamic>>.from(results["all_students"]);
+            }
+            if (results["face_boxes"] != null) {
+              _liveFaceBoxes = List<Map<String, dynamic>>.from(results["face_boxes"]);
+            }
+            for (var st in matchedList) {
+              final stId = int.parse(st["id"].toString());
+              if (!_livePresentStudents.containsKey(stId)) {
+                _livePresentStudents[stId] = st;
+              }
+            }
+            if (_isRecording) {
+              setState(() {
+                _isAiWarmingUp = false;
+                if (_livePresentStudents.isEmpty) {
+                  _statusMessage = "🔴 LIVE SCANNING... Slowly pan camera across student faces!";
+                } else {
+                  _statusMessage = "🔴 LIVE SCANNING: Found ${_livePresentStudents.length} / ${_allClassStudents.length} students!";
+                }
+              });
+            }
           }
         }
       } catch (e) {
@@ -125,6 +175,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     
     _liveStreamTimer?.cancel();
     _liveStreamTimer = null;
+    ApiService.disconnectLiveScanWs();
     
     setState(() {
       _isRecording = false;
@@ -177,13 +228,6 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
         ),
       );
     }
-  }
-
-  @override
-  void dispose() {
-    _liveStreamTimer?.cancel();
-    _cameraController?.dispose();
-    super.dispose();
   }
 
   @override

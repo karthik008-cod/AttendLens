@@ -2,9 +2,31 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 class ApiService {
   static String baseUrl = 'http://127.0.0.1:8000/api';
+  static WebSocketChannel? _liveWsChannel;
+
+  static WebSocketChannel connectLiveScanWs(int classroomId) {
+    _liveWsChannel?.sink.close();
+    final wsUrl = baseUrl.replaceAll('http://', 'ws://').replaceAll('https://', 'wss://');
+    _liveWsChannel = WebSocketChannel.connect(Uri.parse('$wsUrl/ws/live_scan/$classroomId'));
+    return _liveWsChannel!;
+  }
+
+  static bool sendLiveScanFrameBytes(List<int> bytes) {
+    if (_liveWsChannel != null) {
+      _liveWsChannel!.sink.add(bytes);
+      return true;
+    }
+    return false;
+  }
+
+  static void disconnectLiveScanWs() {
+    _liveWsChannel?.sink.close();
+    _liveWsChannel = null;
+  }
 
   static void setBaseUrl(String url) => baseUrl = url;
 
