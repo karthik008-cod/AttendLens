@@ -29,7 +29,7 @@ def extract_face_encoding(image_path: str) -> str:
         return json.dumps(np.zeros(128).tolist())
 
     try:
-        # Use YuNet: OpenCV's ultra-fast (2023) deep learning face detector (~0.05s) with strict enforcement!
+        # Use YuNet: OpenCV's ultra-fast (2023) deep learning face detector (~0.05s)
         embedding_objs = DeepFace.represent(
             img_path=image_path, model_name="Facenet512", detector_backend="yunet", enforce_detection=True
         )
@@ -45,14 +45,22 @@ def extract_face_encoding(image_path: str) -> str:
                 return json.dumps(embedding_objs[0]["embedding"])
         except Exception:
             try:
-                # Final fallback without enforcement for difficult lighting/angles during registration
+                # Built-in opencv cascade detector without memory allocations
                 embedding_objs = DeepFace.represent(
-                    img_path=image_path, model_name="Facenet512", detector_backend="yunet", enforce_detection=False
+                    img_path=image_path, model_name="Facenet512", detector_backend="opencv", enforce_detection=True
                 )
                 if embedding_objs and len(embedding_objs) > 0:
                     return json.dumps(embedding_objs[0]["embedding"])
-            except Exception as e:
-                print(f"Error extracting face encoding: {e}")
+            except Exception:
+                try:
+                    # Final fallback without enforcement for difficult lighting/angles during registration
+                    embedding_objs = DeepFace.represent(
+                        img_path=image_path, model_name="Facenet512", detector_backend="opencv", enforce_detection=False
+                    )
+                    if embedding_objs and len(embedding_objs) > 0:
+                        return json.dumps(embedding_objs[0]["embedding"])
+                except Exception as e:
+                    print(f"Error extracting face encoding: {e}")
 
     return json.dumps(np.zeros(512).tolist())
 

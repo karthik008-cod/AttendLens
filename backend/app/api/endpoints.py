@@ -222,6 +222,7 @@ def delete_class(class_id: int, db = Depends(get_db)):
 @router.get("/classes/{class_id}/students")
 def get_students(class_id: int, db = Depends(get_db)):
     students = list(db.students.find({"classroom_id": class_id}).sort("roll_number", 1))
+    _ensure_student_encodings_ready(students, db)
     return [_student_dict(s, db) for s in students]
 
 
@@ -263,6 +264,9 @@ def _process_student_photos_bg(student_id: int, file_paths: List[str]):
         if all_encs:
             avg_enc = merge_encoding_strings(all_encs)
             db.students.update_one({"id": student_id}, {"$set": {"face_encoding": avg_enc}})
+        else:
+            # If all photos failed or are missing from disk, set zero vector instead of leaving stuck on processing...
+            db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(512).tolist())}})
     except Exception as e:
         print(f"Background photo processing error for student {student_id}: {e}")
 
