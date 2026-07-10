@@ -1,4 +1,4 @@
-# Root Dockerfile for Hugging Face Spaces & Cloud Deployments
+# Root Dockerfile for Render & Cloud Deployments
 FROM python:3.10-slim
 
 # Prevent Python from writing pyc files and enable unbuffered logging
@@ -6,24 +6,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies required by OpenCV and numerical libraries
+# Install system dependencies required by OpenCV
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy backend dependencies and install
+# Copy backend dependencies and install (lightweight — no TensorFlow!)
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir tensorflow-cpu tf-keras opencv-python-headless && \
-    pip install --no-cache-dir --no-deps deepface && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy backend source code

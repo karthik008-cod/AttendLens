@@ -1,6 +1,7 @@
 import os
 import shutil
 import json
+import asyncio
 import numpy as np
 from typing import List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
@@ -228,53 +229,46 @@ def get_students(class_id: int, db = Depends(get_db)):
     return [_student_dict(s, db) for s in students]
 
 
-def _process_student_photos_bg(student_id: int, file_paths: List[str]):
-    from app.db.database import db
+def _process_photos_sync(student_id: int, file_paths: list, db):
+    """Process face encodings SYNCHRONOUSLY during upload. Never stuck on 'processing...'."""
     try:
-        student = db.students.find_one({"id": student_id})
-        if not student:
-            return
-
+        all_encs = []
         for path in file_paths:
             try:
-                existing = db.student_photos.find_one({"student_id": student_id, "photo_path": path})
-                if not existing:
-                    # Also try checking if we have any photo for this student if exact path differs
-                    existing = db.student_photos.find_one({"student_id": student_id})
-
+                # Restore file from photo_bytes if missing from ephemeral disk
                 if not os.path.exists(path):
-                    if existing and existing.get("photo_bytes"):
-                        try:
-                            os.makedirs(os.path.dirname(path), exist_ok=True)
-                            with open(path, "wb") as f:
-                                f.write(existing["photo_bytes"])
-                        except Exception:
-                            pass
+                    photo_doc = db.student_photos.find_one({"student_id": student_id, "photo_path": path})
+                    if photo_doc and photo_doc.get("photo_bytes"):
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        with open(path, "wb") as f:
+                            f.write(photo_doc["photo_bytes"])
 
                 if os.path.exists(path):
                     enc = extract_face_encoding(path)
-                    if existing:
-                        db.student_photos.update_one({"id": existing["id"]}, {"$set": {"face_encoding": enc}})
-                    else:
-                        sp_id = get_next_id("student_photos")
-                        db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": path, "face_encoding": enc})
+                    # Update photo record
+                    db.student_photos.update_one(
+                        {"student_id": student_id, "photo_path": path},
+                        {"$set": {"face_encoding": enc}}
+                    )
+                    all_encs.append(enc)
             except Exception as e:
-                print(f"Error processing individual photo {path}: {e}")
+                print(f"Error processing photo {path}: {e}")
 
-        all_photos = list(db.student_photos.find({"student_id": student_id}))
-        all_encs = [p["face_encoding"] for p in all_photos if p.get("face_encoding") and p.get("face_encoding") != "processing..."]
-        if all_encs:
-            avg_enc = merge_encoding_strings(all_encs)
+        # Merge all valid encodings into the student's face_encoding
+        valid_encs = [e for e in all_encs if e and e != "processing..."]
+        if valid_encs:
+            avg_enc = merge_encoding_strings(valid_encs)
             db.students.update_one({"id": student_id}, {"$set": {"face_encoding": avg_enc}})
         else:
-            # If all photos failed or are missing from disk, set zero vector instead of leaving stuck on processing...
-            db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(512).tolist())}})
+            # Fallback: zero vector so it's never stuck on 'processing...'
+            db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(1280).tolist())}})
     except Exception as e:
-        print(f"Background photo processing error for student {student_id}: {e}")
+        print(f"Photo processing error for student {student_id}: {e}")
+        db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(1280).tolist())}})
 
 
 def _ensure_student_encodings_ready(students_list: list, db):
-    """Self-healing helper: if any student has missing or processing... face_encoding, recover from MongoDB photo_bytes and compute right now!"""
+    """Self-healing: fix any student stuck on 'processing...' by recomputing from photo_bytes."""
     for s in students_list:
         if not s.get("face_encoding") or s.get("face_encoding") == "processing...":
             all_photos = list(db.student_photos.find({"student_id": s["id"]}))
@@ -283,6 +277,7 @@ def _ensure_student_encodings_ready(students_list: list, db):
                 ppath = p.get("photo_path")
                 if not ppath:
                     continue
+                # Restore from photo_bytes if file missing (ephemeral storage)
                 if not os.path.exists(ppath) and p.get("photo_bytes"):
                     try:
                         os.makedirs(os.path.dirname(ppath), exist_ok=True)
@@ -293,7 +288,7 @@ def _ensure_student_encodings_ready(students_list: list, db):
                 if os.path.exists(ppath):
                     valid_paths.append(ppath)
             if valid_paths:
-                _process_student_photos_bg(s["id"], valid_paths)
+                _process_photos_sync(s["id"], valid_paths, db)
                 updated_s = db.students.find_one({"id": s["id"]})
                 if updated_s and updated_s.get("face_encoding") and updated_s.get("face_encoding") != "processing...":
                     s["face_encoding"] = updated_s["face_encoding"]
@@ -301,7 +296,6 @@ def _ensure_student_encodings_ready(students_list: list, db):
 
 @router.post("/students")
 async def add_student(
-    background_tasks: BackgroundTasks,
     name: str = Form(...),
     roll_number: str = Form(...),
     classroom_id: int = Form(...),
@@ -342,20 +336,22 @@ async def add_student(
     if photo_path:
         sp_id = get_next_id("student_photos")
         db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": photo_path, "face_encoding": "processing...", "photo_bytes": content})
-        background_tasks.add_task(_process_student_photos_bg, s_id, [photo_path])
+        # Process synchronously — encoding completes BEFORE response returns
+        _process_photos_sync(s_id, [photo_path], db)
+
+    student = db.students.find_one({"id": s_id})
     return _student_dict(student, db)
 
 
 @router.post("/students/batch")
 async def add_student_batch(
-    background_tasks: BackgroundTasks,
     name: str = Form(...),
     roll_number: str = Form(...),
     classroom_id: int = Form(...),
     photos: List[UploadFile] = File(...),
     db = Depends(get_db),
 ):
-    """Instant bulk enrollment: saves student immediately in 0.05 seconds and processes AI embeddings in the background!"""
+    """Bulk enrollment with SYNCHRONOUS face encoding — never stuck on 'processing...'!"""
     if not photos or len(photos) == 0:
         raise HTTPException(status_code=400, detail="At least 1 photo required")
 
@@ -395,18 +391,20 @@ async def add_student_batch(
         sp_id = get_next_id("student_photos")
         db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": path, "face_encoding": "processing...", "photo_bytes": file_contents[idx]})
 
-    background_tasks.add_task(_process_student_photos_bg, s_id, file_paths)
+    # Process ALL encodings synchronously — completes BEFORE response returns
+    _process_photos_sync(s_id, file_paths, db)
+
+    student = db.students.find_one({"id": s_id})
     return _student_dict(student, db)
 
 
 @router.post("/students/{student_id}/photos")
 async def add_student_photo(
     student_id: int,
-    background_tasks: BackgroundTasks,
     photo: UploadFile = File(...),
     db = Depends(get_db),
 ):
-    """Add an additional photo instantly and process embedding asynchronously."""
+    """Add an additional photo and process face encoding synchronously."""
     s = db.students.find_one({"id": student_id})
     if not s:
         raise HTTPException(status_code=404, detail="Student not found")
@@ -425,10 +423,14 @@ async def add_student_photo(
     sp_id = get_next_id("student_photos")
     db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": file_path, "face_encoding": "processing...", "photo_bytes": content})
 
-    background_tasks.add_task(_process_student_photos_bg, student_id, [file_path])
+    # Reprocess ALL photos for this student to merge the new one
+    all_photos = list(db.student_photos.find({"student_id": student_id}))
+    all_paths = [p["photo_path"] for p in all_photos if p.get("photo_path")]
+    _process_photos_sync(student_id, all_paths, db)
 
+    s = db.students.find_one({"id": student_id})
     return {
-        "message": "Photo upload started in background",
+        "message": "Photo processed and encoding updated",
         "student": _student_dict(s, db),
     }
 
