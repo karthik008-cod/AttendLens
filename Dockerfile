@@ -22,6 +22,8 @@ WORKDIR /app
 # Copy backend dependencies and install
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir tensorflow-cpu tf-keras opencv-python-headless && \
+    pip install --no-cache-dir --no-deps deepface && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy backend source code
