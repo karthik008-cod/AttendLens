@@ -36,5 +36,5 @@ def root():
         "message": "AttendLens API v2.0 (MongoDB Atlas + OpenCV Engine) Running",
         "docs": "/docs",
         "status": "online",
-        "database": db.name if db else "offline"
+        "database": db.name if db is not None else "offline"
     }
