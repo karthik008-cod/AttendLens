@@ -10,7 +10,7 @@ from pydantic import BaseModel
 import bcrypt
 from app.db.database import get_db, get_next_id
 from app.db.models import Teacher, Classroom, Student, StudentPhoto, LectureDate, AttendanceRecord
-from app.services.ai_engine import extract_face_encoding, merge_student_encodings, merge_encoding_strings, process_classroom_video, process_single_frame, assess_photo_quality_and_liveness
+from app.services.ai_engine import extract_face_encoding, merge_student_encodings, merge_encoding_strings, process_classroom_video, process_single_frame, assess_photo_quality_and_liveness, ENCODING_DIM
 from app.services.excel_service import generate_class_excel
 
 def hash_password(password: str) -> str:
@@ -261,16 +261,28 @@ def _process_photos_sync(student_id: int, file_paths: list, db):
             db.students.update_one({"id": student_id}, {"$set": {"face_encoding": avg_enc}})
         else:
             # Fallback: zero vector so it's never stuck on 'processing...'
-            db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(1280).tolist())}})
+            db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(ENCODING_DIM).tolist())}})
     except Exception as e:
         print(f"Photo processing error for student {student_id}: {e}")
-        db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(1280).tolist())}})
+        db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(ENCODING_DIM).tolist())}})
 
 
 def _ensure_student_encodings_ready(students_list: list, db):
-    """Self-healing: fix any student stuck on 'processing...' by recomputing from photo_bytes."""
+    """Self-healing: fix any student stuck on 'processing...' or with outdated dimension by recomputing from photo_bytes."""
     for s in students_list:
-        if not s.get("face_encoding") or s.get("face_encoding") == "processing...":
+        needs_reencode = False
+        enc = s.get("face_encoding")
+        if not enc or enc == "processing...":
+            needs_reencode = True
+        else:
+            try:
+                emb = json.loads(enc)
+                if len(emb) != ENCODING_DIM:
+                    needs_reencode = True
+            except Exception:
+                needs_reencode = True
+
+        if needs_reencode:
             all_photos = list(db.student_photos.find({"student_id": s["id"]}))
             valid_paths = []
             for p in all_photos:
