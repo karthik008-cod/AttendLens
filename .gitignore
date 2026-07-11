@@ -7,3 +7,7 @@ backend/reports/*.xlsx
 __pycache__/
 *.pyc
 .env
+.idea/
+backend/check_*.py
+backend/test_*.py
+backend/fast_engine.js
