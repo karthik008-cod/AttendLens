@@ -17,7 +17,7 @@ import numpy as np
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 ENCODING_DIM = 128       # SphereFace/SFace deep feature dimension
-MATCH_THRESHOLD = 0.50   # Cosine distance (<0.50 means neural similarity >0.50 = guaranteed same person)
+MATCH_THRESHOLD = 0.60   # Cosine distance (<0.60 means neural similarity >0.40 = guaranteed same person)
 
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../models")
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -314,7 +314,7 @@ def _match_face(frame_emb, student_ids, student_matrix, threshold):
         return None, float('inf')
 
     if len(frame_emb) != student_matrix.shape[1]:
-        return None, float('inf')
+        return None, float('inf'), None
 
     frame_norm = frame_emb / (np.linalg.norm(frame_emb) + 1e-9)
     cosine_dists = 1.0 - np.dot(student_matrix, frame_norm)
@@ -323,8 +323,8 @@ def _match_face(frame_emb, student_ids, student_matrix, threshold):
     best_id = student_ids[best_idx]
 
     if best_dist < threshold:
-        return best_id, best_dist
-    return None, best_dist
+        return best_id, best_dist, best_id
+    return None, best_dist, best_id
 
 def process_classroom_video(video_path: str, student_encodings: dict, student_info: dict = None) -> tuple:
     """Scan video frames against known student encodings using SFace + YuNet."""
@@ -396,7 +396,7 @@ def process_classroom_video(video_path: str, student_encodings: dict, student_in
                 roi = frame[y1:y2, x1:x2]
                 frame_emb = _extract_face_features_fallback(roi)
 
-            best_id, best_dist = _match_face(frame_emb, student_ids, student_matrix, MATCH_THRESHOLD)
+            best_id, best_dist, closest_id = _match_face(frame_emb, student_ids, student_matrix, MATCH_THRESHOLD)
             if best_id is not None:
                 st_name = student_info[best_id].get("name", "Student") if student_info and best_id in student_info else "Student"
                 print(f"Video Frame {frame_count}: Matched {st_name} [dist: {best_dist:.4f} < {MATCH_THRESHOLD}]")
@@ -478,7 +478,7 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
             roi = img[y1:y2, x1:x2]
             frame_emb = _extract_face_features_fallback(roi)
 
-        best_id, best_dist = _match_face(frame_emb, student_ids, student_matrix, MATCH_THRESHOLD)
+        best_id, best_dist, closest_id = _match_face(frame_emb, student_ids, student_matrix, MATCH_THRESHOLD)
 
         face_ratio = max(fw / max(w, 1), 0.015)
         est_meters = round(min(max(0.16 / face_ratio, 0.6), 8.0), 1)
@@ -496,10 +496,16 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
             if student_info and best_id in student_info:
                 st_name = student_info[best_id].get("name", "Student")
                 st_roll = student_info[best_id].get("roll_number", best_id)
-            print(f"Live Frame: Matched {st_name}({st_roll}) [dist: {best_dist:.4f} < {MATCH_THRESHOLD} | est: {est_meters}m]")
+            print(f"Live Frame: ✅ Matched {st_name}({st_roll}) [dist: {best_dist:.4f} < {MATCH_THRESHOLD} | est: {est_meters}m]")
             matched_ids.add(best_id)
             face_boxes.append({"id": best_id, "dist": round(best_dist, 4), "threshold": MATCH_THRESHOLD, "est_meters": est_meters, "box": box})
         else:
+            closest_name = "Unknown"
+            closest_roll = closest_id
+            if closest_id is not None and student_info and closest_id in student_info:
+                closest_name = student_info[closest_id].get("name", "Unknown")
+                closest_roll = student_info[closest_id].get("roll_number", closest_id)
+            print(f"Live Frame: ❓ Face detected but below confidence [closest: {closest_name}({closest_roll}) dist: {best_dist:.4f} >= {MATCH_THRESHOLD} | est: {est_meters}m]")
             face_boxes.append({"id": None, "dist": round(best_dist, 4) if best_dist != float('inf') else 1.0, "threshold": MATCH_THRESHOLD, "est_meters": est_meters, "box": box})
 
     if image_path:
