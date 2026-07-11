@@ -936,12 +936,28 @@ def get_class_analytics(class_id: int, db = Depends(get_db)):
     # Per-date totals
     date_summaries = []
     for ld in lecture_dates:
-        present = sum(1 for s in students if status_map.get((s["id"], ld["id"])) == "P")
+        present_list = []
+        absent_list = []
+        for s in students:
+            status = status_map.get((s["id"], ld["id"]), "A")
+            info = {
+                "id": s["id"],
+                "name": s["name"],
+                "roll_number": s.get("roll_number", ""),
+                "phone": s.get("phone", "")
+            }
+            if status == "P":
+                present_list.append(info)
+            else:
+                absent_list.append(info)
+
         date_summaries.append({
             "date": ld["date_str"],
-            "present": present,
-            "absent": total_students - present,
-            "percentage": round(present / total_students * 100, 1) if total_students > 0 else 0.0,
+            "present": len(present_list),
+            "absent": len(absent_list),
+            "percentage": round(len(present_list) / total_students * 100, 1) if total_students > 0 else 0.0,
+            "present_list": present_list,
+            "absent_list": absent_list,
         })
 
     # Per-student totals (sorted by % ascending — most at-risk first)
@@ -960,6 +976,7 @@ def get_class_analytics(class_id: int, db = Depends(get_db)):
         pct = round(present / total_lectures * 100, 1) if total_lectures > 0 else 0.0
         student_summaries.append({
             "id": s["id"], "name": s["name"], "roll_number": s["roll_number"],
+            "phone": s.get("phone", ""),
             "present": present, "absent": total_lectures - present,
             "total": total_lectures, "percentage": pct, "history": history,
         })

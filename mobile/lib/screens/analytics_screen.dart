@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:mobile/services/api_service.dart';
 import 'package:mobile/theme/theme.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   final int classId;
@@ -23,6 +24,140 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
   String _searchQuery = '';
   String _sortBy = 'Default';
   String _filterBy = 'All';
+  String? _selectedDateFilter;
+
+  Future<void> _pickFilterDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2023),
+      lastDate: DateTime(2030),
+      builder: (ctx, child) {
+        return Theme(
+          data: ThemeData.dark().copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: AttendLensTheme.statusPresent,
+              onPrimary: Colors.white,
+              surface: AttendLensTheme.surfaceDark,
+              onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      final m = picked.month.toString().padLeft(2, '0');
+      final d = picked.day.toString().padLeft(2, '0');
+      setState(() {
+        _selectedDateFilter = '${picked.year}-$m-$d';
+      });
+    }
+  }
+
+  void _showSessionAttendanceModal(Map<String, dynamic> dateSummary) {
+    final presentList = List<Map<String, dynamic>>.from(dateSummary['present_list'] ?? []);
+    final absentList = List<Map<String, dynamic>>.from(dateSummary['absent_list'] ?? []);
+    final dateStr = dateSummary['date'] as String;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AttendLensTheme.surfaceDark,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => DefaultTabController(
+        length: 2,
+        child: Container(
+          height: MediaQuery.of(ctx).size.height * 0.75,
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Icon(Icons.calendar_today_rounded, color: AttendLensTheme.accentCyan, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text("Attendance: $dateStr", style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white60),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TabBar(
+                indicatorColor: AttendLensTheme.statusPresent,
+                labelStyle: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                unselectedLabelStyle: GoogleFonts.outfit(),
+                tabs: [
+                  Tab(text: "🟢 Present (${presentList.length})"),
+                  Tab(text: "🔴 Absent (${absentList.length})"),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    _buildStudentListTab(presentList, isPresent: true),
+                    _buildStudentListTab(absentList, isPresent: false),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStudentListTab(List<Map<String, dynamic>> list, {required bool isPresent}) {
+    if (list.isEmpty) {
+      return Center(
+        child: Text(
+          isPresent ? "No students marked present." : "No students absent on this date!",
+          style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 15),
+        ),
+      );
+    }
+    return ListView.builder(
+      itemCount: list.length,
+      itemBuilder: (context, index) {
+        final s = list[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.04),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: isPresent ? AttendLensTheme.statusPresent.withOpacity(0.2) : AttendLensTheme.statusAbsent.withOpacity(0.2)),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: isPresent ? AttendLensTheme.statusPresent.withOpacity(0.2) : AttendLensTheme.statusAbsent.withOpacity(0.2),
+                child: Icon(isPresent ? Icons.check_circle : Icons.cancel, color: isPresent ? AttendLensTheme.statusPresent : AttendLensTheme.statusAbsent, size: 20),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(s['name'] ?? '', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15)),
+                    Text("Roll No: ${s['roll_number'] ?? 'N/A'}", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   void initState() {
@@ -87,10 +222,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
   // ── Class Overview Tab ─────────────────────────────────────────────────────
 
   Widget _buildClassTab() {
-    final dates = List<Map<String, dynamic>>.from(_data!['date_summaries'] ?? []);
+    var dates = List<Map<String, dynamic>>.from(_data!['date_summaries'] ?? []);
     final totalLectures = (_data!['total_lectures'] as int?) ?? 0;
     final totalStudents = (_data!['total_students'] as int?) ?? 0;
     final avgPct = (_data!['overall_avg_percentage'] as num?)?.toDouble() ?? 0.0;
+
+    if (_selectedDateFilter != null && _selectedDateFilter!.isNotEmpty) {
+      dates = dates.where((d) => (d['date'] as String).startsWith(_selectedDateFilter!)).toList();
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -105,7 +244,42 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
             const SizedBox(width: 12),
             _summaryCard('${avgPct.toStringAsFixed(0)}%', 'Avg. %', Icons.show_chart, _pctColor(avgPct)),
           ]),
-          const SizedBox(height: 28),
+          const SizedBox(height: 20),
+
+          // Search / Calendar Date Filter Bar
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _selectedDateFilter != null ? AttendLensTheme.accentCyan : Colors.white,
+                    side: BorderSide(color: _selectedDateFilter != null ? AttendLensTheme.accentCyan : Colors.white24, width: 1.5),
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: const Icon(Icons.calendar_month_outlined, size: 18),
+                  label: Text(
+                    _selectedDateFilter != null ? "Date: $_selectedDateFilter" : "Search Date via Calendar",
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: _pickFilterDate,
+                ),
+              ),
+              if (_selectedDateFilter != null) ...[
+                const SizedBox(width: 10),
+                Container(
+                  decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(14)),
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white70),
+                    tooltip: "Clear Filter",
+                    onPressed: () => setState(() => _selectedDateFilter = null),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 24),
 
           if (dates.isEmpty) ...[
             Container(
@@ -113,14 +287,23 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
               padding: const EdgeInsets.all(32),
               decoration: AttendLensTheme.glassDecoration,
               child: Column(children: [
-                const Text('📋', style: TextStyle(fontSize: 48)),
+                const Icon(Icons.event_busy, color: Colors.white24, size: 48),
                 const SizedBox(height: 12),
-                Text('No attendance sessions yet', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                Text('Take attendance to see charts here', style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 13)),
+                Text(_selectedDateFilter != null ? 'No sessions on $_selectedDateFilter' : 'No attendance sessions yet', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 6),
+                Text(_selectedDateFilter != null ? 'Try choosing another date or clearing filter' : 'Take attendance to see charts here', style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 13)),
+                if (_selectedDateFilter != null) ...[
+                  const SizedBox(height: 16),
+                  TextButton.icon(
+                    icon: const Icon(Icons.clear_all, size: 16),
+                    label: Text("Clear Date Filter", style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                    onPressed: () => setState(() => _selectedDateFilter = null),
+                  ),
+                ],
               ]),
             ),
           ] else ...[
-            Text('Attendance Per Session', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+            Text('Attendance Per Session (Tap to view Absentees/Presentees)', style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.bold, color: AttendLensTheme.accentCyan)),
             const SizedBox(height: 16),
 
             // Bar Chart — scrollable like a stock chart
@@ -153,7 +336,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
                             final i = val.toInt();
                             if (i < 0 || i >= dates.length) return const SizedBox.shrink();
                             final raw = dates[i]['date'] as String;
-                            // Show abbreviated: "MM-DD\nHH:mm"
                             final datePart = raw.length >= 10 ? raw.substring(5, 10) : raw;
                             final timePart = raw.length > 11 ? raw.substring(11, 16) : '';
                             return Padding(
@@ -192,22 +374,35 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
 
             const SizedBox(height: 20),
 
-            // Date breakdown list
+            // Date breakdown list (Clickable cards)
             ...dates.reversed.map((d) {
               final pct = (d['percentage'] as num).toDouble();
-              return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(color: AttendLensTheme.surfaceDark, borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.white.withOpacity(0.07))),
-                child: Row(children: [
-                  Container(width: 4, height: 40, decoration: BoxDecoration(color: _pctColor(pct), borderRadius: BorderRadius.circular(2))),
-                  const SizedBox(width: 14),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(d['date'], style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
-                    Text('${d['present']}P  ${d['absent']}A', style: GoogleFonts.outfit(fontSize: 12, color: AttendLensTheme.textSecondary)),
-                  ])),
-                  Text('${pct.toStringAsFixed(1)}%', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: _pctColor(pct))),
-                ]),
+              return GestureDetector(
+                onTap: () => _showSessionAttendanceModal(d),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(color: AttendLensTheme.surfaceDark, borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.white.withOpacity(0.07))),
+                  child: Row(children: [
+                    Container(width: 4, height: 40, decoration: BoxDecoration(color: _pctColor(pct), borderRadius: BorderRadius.circular(2))),
+                    const SizedBox(width: 14),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(d['date'], style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text('${d['present']}P  ${d['absent']}A', style: GoogleFonts.outfit(fontSize: 12, color: AttendLensTheme.textSecondary)),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.touch_app_outlined, size: 13, color: AttendLensTheme.accentCyan),
+                          Text(" Tap to view list", style: GoogleFonts.outfit(fontSize: 11, color: AttendLensTheme.accentCyan)),
+                        ],
+                      ),
+                    ])),
+                    Text('${pct.toStringAsFixed(1)}%', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: _pctColor(pct))),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white30),
+                  ]),
+                ),
               );
             }),
           ],
@@ -450,8 +645,95 @@ class _StudentCardState extends State<_StudentCard> {
     final roll = widget.student['roll_number'];
     final present = widget.student['present'];
     final total = widget.student['total'];
+    final phoneRaw = (widget.student['phone'] ?? '').toString().trim();
+    final phoneClean = phoneRaw.replaceAll(RegExp(r'[^0-9+]'), '');
+
     final message = '🚨 AttendLens Academic Warning:\n\nHello $name (Roll No: $roll),\n\nYour attendance is currently at ${pct.toStringAsFixed(1)}% ($present Present / $total Total sessions), which falls below the mandatory 75% threshold.\n\nPlease attend upcoming classes regularly or contact the faculty advisor immediately to avoid attendance shortage penalties.';
-    Share.share(message, subject: 'AttendLens Shortage Warning: $name');
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AttendLensTheme.surfaceDark,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.send_to_mobile, color: Colors.orangeAccent, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("Nudge $name (<75%)", style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text(phoneRaw.isNotEmpty ? "Enrolled Mobile: $phoneRaw" : "No mobile number enrolled yet", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            if (phoneClean.isNotEmpty) ...[
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: const Color(0xFF25D366).withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.chat_bubble, color: Color(0xFF25D366)),
+                ),
+                title: Text("Send via WhatsApp", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: Text("Opens WhatsApp with pre-filled warning", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 12)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final uri = Uri.parse('https://wa.me/$phoneClean?text=${Uri.encodeComponent(message)}');
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  } else {
+                    Share.share(message, subject: 'AttendLens Shortage Warning: $name');
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.sms_rounded, color: Colors.blueAccent),
+                ),
+                title: Text("Send via SMS / Messages", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: Text("Opens phone messages app with alert text", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 12)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final uri = Uri.parse('sms:$phoneClean?body=${Uri.encodeComponent(message)}');
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri);
+                  } else {
+                    Share.share(message, subject: 'AttendLens Shortage Warning: $name');
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.share_rounded, color: Colors.white),
+              ),
+              title: Text("Share via Other App / Email", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
+              subtitle: Text("Use system share menu", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 12)),
+              onTap: () {
+                Navigator.pop(ctx);
+                Share.share(message, subject: 'AttendLens Shortage Warning: $name');
+              },
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showHistoryEditorModal(BuildContext context) {
