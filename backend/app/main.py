@@ -23,12 +23,14 @@ app.include_router(api_router)  # Also mount at root so requests without /api pr
 app.include_router(invite_router)  # Serves /invite/{class_id} at root level
 
 
+from app.api.endpoints import log_print
+
 @app.on_event("startup")
 def startup_db_check():
     try:
-        print(f"[OK] Connected to MongoDB Atlas Cluster | Active Database: {db.name}")
+        log_print(f"[OK] Connected to MongoDB Atlas Cluster | Active Database: {db.name}")
     except Exception as e:
-        print(f"[WARN] MongoDB connection warning on startup: {e}")
+        log_print(f"[WARN] MongoDB connection warning on startup: {e}")
 
 
 @app.get("/")

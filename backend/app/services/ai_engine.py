@@ -10,10 +10,22 @@ Face Matching:   Cosine distance with strict thresholding (zero false positives)
 """
 
 import os
+import sys
 import json
+import logging
 import urllib.request
 import cv2
 import numpy as np
+
+uvicorn_logger = logging.getLogger("uvicorn.error")
+
+def log_print(msg: str):
+    print(msg, flush=True)
+    sys.stdout.flush()
+    try:
+        uvicorn_logger.info(msg)
+    except Exception:
+        pass
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 ENCODING_DIM = 128       # SphereFace/SFace deep feature dimension
@@ -456,7 +468,7 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
             detected_faces.append((x, y, fw, fh, None))
 
     if not detected_faces:
-        print("Live Frame: No face detected in camera frame")
+        log_print("Live Frame: No face detected in camera frame")
 
     for (x, y, fw, fh, f_row) in detected_faces:
         # Skip obstructions or super close-ups blocking the lens
@@ -496,7 +508,7 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
             if student_info and best_id in student_info:
                 st_name = student_info[best_id].get("name", "Student")
                 st_roll = student_info[best_id].get("roll_number", best_id)
-            print(f"Live Frame: ✅ Matched {st_name}({st_roll}) [dist: {best_dist:.4f} < {MATCH_THRESHOLD} | est: {est_meters}m]")
+            log_print(f"Live Frame: ✅ Matched {st_name}({st_roll}) [dist: {best_dist:.4f} < {MATCH_THRESHOLD} | est: {est_meters}m]")
             matched_ids.add(best_id)
             face_boxes.append({"id": best_id, "dist": round(best_dist, 4), "threshold": MATCH_THRESHOLD, "est_meters": est_meters, "box": box})
         else:
@@ -505,7 +517,7 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
             if closest_id is not None and student_info and closest_id in student_info:
                 closest_name = student_info[closest_id].get("name", "Unknown")
                 closest_roll = student_info[closest_id].get("roll_number", closest_id)
-            print(f"Live Frame: ❓ Face detected but below confidence [closest: {closest_name}({closest_roll}) dist: {best_dist:.4f} >= {MATCH_THRESHOLD} | est: {est_meters}m]")
+            log_print(f"Live Frame: ❓ Face detected but below confidence [closest: {closest_name}({closest_roll}) dist: {best_dist:.4f} >= {MATCH_THRESHOLD} | est: {est_meters}m]")
             face_boxes.append({"id": None, "dist": round(best_dist, 4) if best_dist != float('inf') else 1.0, "threshold": MATCH_THRESHOLD, "est_meters": est_meters, "box": box})
 
     if image_path:

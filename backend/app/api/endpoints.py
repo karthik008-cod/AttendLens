@@ -12,6 +12,17 @@ from app.db.database import get_db, get_next_id
 from app.db.models import Teacher, Classroom, Student, StudentPhoto, LectureDate, AttendanceRecord
 from app.services.ai_engine import extract_face_encoding, merge_student_encodings, merge_encoding_strings, process_classroom_video, process_single_frame, assess_photo_quality_and_liveness, ENCODING_DIM
 from app.services.excel_service import generate_class_excel
+import sys
+import logging
+uvicorn_logger = logging.getLogger("uvicorn.error")
+
+def log_print(msg: str):
+    print(msg, flush=True)
+    sys.stdout.flush()
+    try:
+        uvicorn_logger.info(msg)
+    except Exception:
+        pass
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -231,7 +242,7 @@ def get_students(class_id: int, db = Depends(get_db)):
 
 def _process_photos_sync(student_id: int, file_paths: list, db):
     """Process face encodings SYNCHRONOUSLY during upload. Never stuck on 'processing...'."""
-    print(f"📸 [ENROLLMENT] Processing {len(file_paths)} photos for student ID {student_id}...")
+    log_print(f"📸 [ENROLLMENT] Processing {len(file_paths)} photos for student ID {student_id}...")
     try:
         all_encs = []
         for path in file_paths:
@@ -253,20 +264,20 @@ def _process_photos_sync(student_id: int, file_paths: list, db):
                     )
                     all_encs.append(enc)
             except Exception as e:
-                print(f"⚠️ [ENROLLMENT] Error extracting features from photo {path}: {e}")
+                log_print(f"⚠️ [ENROLLMENT] Error extracting features from photo {path}: {e}")
 
         # Merge all valid encodings into the student's face_encoding
         valid_encs = [e for e in all_encs if e and e != "processing..."]
         if valid_encs:
             avg_enc = merge_encoding_strings(valid_encs)
             db.students.update_one({"id": student_id}, {"$set": {"face_encoding": avg_enc}})
-            print(f"✅ [ENROLLMENT] Successfully generated and stored 128-dim SFace neural vector for student ID {student_id}!")
+            log_print(f"✅ [ENROLLMENT] Successfully generated and stored 128-dim SFace neural vector for student ID {student_id}!")
         else:
             # Fallback: zero vector so it's never stuck on 'processing...'
-            print(f"⚠️ [ENROLLMENT] Could not extract valid face features from photos for student ID {student_id}. Storing fallback 0-vector.")
+            log_print(f"⚠️ [ENROLLMENT] Could not extract valid face features from photos for student ID {student_id}. Storing fallback 0-vector.")
             db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(ENCODING_DIM).tolist())}})
     except Exception as e:
-        print(f"⚠️ [ENROLLMENT] Photo processing fatal error for student {student_id}: {e}")
+        log_print(f"⚠️ [ENROLLMENT] Photo processing fatal error for student {student_id}: {e}")
         db.students.update_one({"id": student_id}, {"$set": {"face_encoding": json.dumps(np.zeros(ENCODING_DIM).tolist())}})
 
 
@@ -597,12 +608,12 @@ async def stream_frame(
 @router.websocket("/ws/live_scan/{classroom_id}")
 async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db = Depends(get_db)):
     await websocket.accept()
-    print(f"🔌 [LIVE SCAN WS] Client connected for Classroom ID {classroom_id}!")
+    log_print(f"🔌 [LIVE SCAN WS] Client connected for Classroom ID {classroom_id}!")
     students = list(db.students.find({"classroom_id": classroom_id}))
     _ensure_student_encodings_ready(students, db)
     encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding") and s.get("face_encoding") != "processing..."}
     student_map = {s["id"]: _student_dict(s, db) for s in students}
-    print(f"🧠 [LIVE SCAN WS] Loaded {len(encodings)} valid student face vectors for Classroom {classroom_id}: {[s['name'] for s in student_map.values()]}")
+    log_print(f"🧠 [LIVE SCAN WS] Loaded {len(encodings)} valid student face vectors for Classroom {classroom_id}: {[s['name'] for s in student_map.values()]}")
 
     frame_count = 0
     try:
@@ -616,12 +627,12 @@ async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db = Depe
             if len(encodings) == 0 or frame_count % 30 == 0:
                 curr_count = db.students.count_documents({"classroom_id": classroom_id})
                 if curr_count != len(students) or len(encodings) < curr_count:
-                    print(f"🔄 [LIVE SCAN WS] New/pending enrollment detected! Refreshing face vectors for Classroom {classroom_id}...")
+                    log_print(f"🔄 [LIVE SCAN WS] New/pending enrollment detected! Refreshing face vectors for Classroom {classroom_id}...")
                     students = list(db.students.find({"classroom_id": classroom_id}))
                     _ensure_student_encodings_ready(students, db)
                     encodings = {s["id"]: s.get("face_encoding") for s in students if s.get("face_encoding") and s.get("face_encoding") != "processing..."}
                     student_map = {s["id"]: _student_dict(s, db) for s in students}
-                    print(f"✅ [LIVE SCAN WS] Refresh complete. Active face vectors: {len(encodings)}")
+                    log_print(f"✅ [LIVE SCAN WS] Refresh complete. Active face vectors: {len(encodings)}")
 
             frame_res = await asyncio.to_thread(
                 process_single_frame, None, encodings, student_map, raw_bytes
@@ -648,7 +659,7 @@ async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db = Depe
             all_list = [_student_dict(s, db) for s in students]
             await websocket.send_json({"matched_students": present_list, "all_students": all_list, "face_boxes": enriched_boxes})
     except (WebSocketDisconnect, Exception) as e:
-        print(f"🛑 [LIVE SCAN WS] WebSocket disconnected for class {classroom_id}: {e}")
+        log_print(f"🛑 [LIVE SCAN WS] WebSocket disconnected for class {classroom_id}: {e}")
 
 
 @router.post("/attendance/confirm")
