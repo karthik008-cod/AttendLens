@@ -115,6 +115,13 @@ def _classroom_dict(c: dict, db) -> dict:
         "student_count": student_count,
     }
 
+def _get_phone(s: dict) -> str:
+    for k in ("phone", "parent_phone", "mobile", "contact", "phone_number", "contact_number"):
+        val = s.get(k)
+        if val is not None and str(val).strip() and str(val).strip() != "None":
+            return str(val).strip()
+    return ""
+
 def _student_dict(s: dict, db=None) -> dict:
     photo_count = db.student_photos.count_documents({"student_id": s["id"]}) if db is not None else 1
     if photo_count == 0 and s.get("photo_path"):
@@ -124,7 +131,7 @@ def _student_dict(s: dict, db=None) -> dict:
         "name": s.get("name"),
         "roll_number": s.get("roll_number"),
         "dob": s.get("dob", ""),
-        "phone": s.get("phone", ""),
+        "phone": _get_phone(s),
         "village": s.get("village", ""),
         "photo_path": s.get("photo_path"),
         "photo_count": photo_count,
@@ -944,7 +951,7 @@ def get_class_analytics(class_id: int, db = Depends(get_db)):
                 "id": s["id"],
                 "name": s["name"],
                 "roll_number": s.get("roll_number", ""),
-                "phone": s.get("phone", "")
+                "phone": _get_phone(s)
             }
             if status == "P":
                 present_list.append(info)
@@ -976,7 +983,7 @@ def get_class_analytics(class_id: int, db = Depends(get_db)):
         pct = round(present / total_lectures * 100, 1) if total_lectures > 0 else 0.0
         student_summaries.append({
             "id": s["id"], "name": s["name"], "roll_number": s["roll_number"],
-            "phone": s.get("phone", ""),
+            "phone": _get_phone(s),
             "present": present, "absent": total_lectures - present,
             "total": total_lectures, "percentage": pct, "history": history,
         })

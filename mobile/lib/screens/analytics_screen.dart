@@ -640,100 +640,25 @@ class _StudentCard extends StatefulWidget {
 class _StudentCardState extends State<_StudentCard> {
   bool _expanded = false;
 
-  void _sendAtRiskAlert(double pct) {
-    final name = widget.student['name'];
-    final roll = widget.student['roll_number'];
-    final present = widget.student['present'];
-    final total = widget.student['total'];
-    final phoneRaw = (widget.student['phone'] ?? '').toString().trim();
+  void _sendAtRiskAlert(double pct) async {
+    final name = widget.student['name'] ?? 'Student';
+    final roll = widget.student['roll_number'] ?? '';
+    final present = widget.student['present'] ?? 0;
+    final total = widget.student['total'] ?? 0;
+    final phoneRaw = (widget.student['phone'] ?? widget.student['parent_phone'] ?? widget.student['mobile'] ?? '').toString().trim();
     final phoneClean = phoneRaw.replaceAll(RegExp(r'[^0-9+]'), '');
 
     final message = '🚨 AttendLens Academic Warning:\n\nHello $name (Roll No: $roll),\n\nYour attendance is currently at ${pct.toStringAsFixed(1)}% ($present Present / $total Total sessions), which falls below the mandatory 75% threshold.\n\nPlease attend upcoming classes regularly or contact the faculty advisor immediately to avoid attendance shortage penalties.';
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AttendLensTheme.surfaceDark,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.send_to_mobile, color: Colors.orangeAccent, size: 24),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text("Nudge $name (<75%)", style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                      Text(phoneRaw.isNotEmpty ? "Enrolled Mobile: $phoneRaw" : "No mobile number enrolled yet", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 13)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            if (phoneClean.isNotEmpty) ...[
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: const Color(0xFF25D366).withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.chat_bubble, color: Color(0xFF25D366)),
-                ),
-                title: Text("Send via WhatsApp", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: Text("Opens WhatsApp with pre-filled warning", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 12)),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  final uri = Uri.parse('https://wa.me/$phoneClean?text=${Uri.encodeComponent(message)}');
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  } else {
-                    Share.share(message, subject: 'AttendLens Shortage Warning: $name');
-                  }
-                },
-              ),
-              const SizedBox(height: 10),
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: Colors.blueAccent.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.sms_rounded, color: Colors.blueAccent),
-                ),
-                title: Text("Send via SMS / Messages", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: Text("Opens phone messages app with alert text", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 12)),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  final uri = Uri.parse('sms:$phoneClean?body=${Uri.encodeComponent(message)}');
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri);
-                  } else {
-                    Share.share(message, subject: 'AttendLens Shortage Warning: $name');
-                  }
-                },
-              ),
-              const SizedBox(height: 10),
-            ],
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(12)),
-                child: const Icon(Icons.share_rounded, color: Colors.white),
-              ),
-              title: Text("Share via Other App / Email", style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
-              subtitle: Text("Use system share menu", style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 12)),
-              onTap: () {
-                Navigator.pop(ctx);
-                Share.share(message, subject: 'AttendLens Shortage Warning: $name');
-              },
-            ),
-            const SizedBox(height: 10),
-          ],
-        ),
-      ),
-    );
+    if (phoneClean.isNotEmpty) {
+      final smsUri = Uri.parse('sms:$phoneClean?body=${Uri.encodeComponent(message)}');
+      if (await canLaunchUrl(smsUri)) {
+        await launchUrl(smsUri);
+        return;
+      }
+    }
+
+    Share.share(message, subject: 'AttendLens Shortage Warning: $name');
   }
 
   void _showHistoryEditorModal(BuildContext context) {
