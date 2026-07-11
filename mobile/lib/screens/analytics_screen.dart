@@ -646,14 +646,26 @@ class _StudentCardState extends State<_StudentCard> {
     final present = widget.student['present'] ?? 0;
     final total = widget.student['total'] ?? 0;
     final phoneRaw = (widget.student['phone'] ?? widget.student['parent_phone'] ?? widget.student['mobile'] ?? '').toString().trim();
-    final phoneClean = phoneRaw.replaceAll(RegExp(r'[^0-9+]'), '');
+
+    String cleanDigits = phoneRaw.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleanDigits.startsWith('0') && cleanDigits.length == 11) {
+      cleanDigits = cleanDigits.substring(1);
+    }
+    // Prepend India country code 91 if exactly 10 digits (e.g., 9876543210 -> +919876543210 / 919876543210)
+    String smsPhone = cleanDigits.length == 10 ? '+91$cleanDigits' : (phoneRaw.startsWith('+') ? phoneRaw : cleanDigits);
+    String waPhone = cleanDigits.length == 10 ? '91$cleanDigits' : cleanDigits;
 
     final message = '🚨 AttendLens Academic Warning:\n\nHello $name (Roll No: $roll),\n\nYour attendance is currently at ${pct.toStringAsFixed(1)}% ($present Present / $total Total sessions), which falls below the mandatory 75% threshold.\n\nPlease attend upcoming classes regularly or contact the faculty advisor immediately to avoid attendance shortage penalties.';
 
-    if (phoneClean.isNotEmpty) {
-      final smsUri = Uri.parse('sms:$phoneClean?body=${Uri.encodeComponent(message)}');
+    if (cleanDigits.isNotEmpty) {
+      final smsUri = Uri.parse('sms:$smsPhone?body=${Uri.encodeComponent(message)}');
       if (await canLaunchUrl(smsUri)) {
         await launchUrl(smsUri);
+        return;
+      }
+      final waUri = Uri.parse('https://wa.me/$waPhone?text=${Uri.encodeComponent(message)}');
+      if (await canLaunchUrl(waUri)) {
+        await launchUrl(waUri, mode: LaunchMode.externalApplication);
         return;
       }
     }
