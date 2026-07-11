@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mobile/services/api_service.dart';
 import 'package:mobile/theme/theme.dart';
@@ -16,6 +18,37 @@ class _ClassDashboardScreenState extends State<ClassDashboardScreen> {
   List<dynamic> _classes = [];
   bool _isLoading = true;
   final int _defaultTeacherId = 1; // Default teacher for demo
+
+  Future<void> _pickAndUploadCsv(int classId, String className) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv', 'xlsx', 'xls', 'txt'],
+      );
+      if (result != null && result.files.single.path != null) {
+        final file = File(result.files.single.path!);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('⚡ Uploading and enrolling students from CSV/Excel...'), backgroundColor: AttendLensTheme.primaryIndigo),
+          );
+        }
+        final res = await ApiService.uploadStudentsCsv(classId, file);
+        final count = res['created_count'] ?? 0;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✅ Successfully enrolled $count students into $className!'), backgroundColor: Colors.green, duration: const Duration(seconds: 4)),
+          );
+          _loadClasses();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -296,6 +329,21 @@ class _ClassDashboardScreenState extends State<ClassDashboardScreen> {
                                           ),
                                         ),
                                       ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: AttendLensTheme.accentCyan,
+                                          side: const BorderSide(color: AttendLensTheme.accentCyan, width: 1.5),
+                                          padding: const EdgeInsets.symmetric(vertical: 11),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                        ),
+                                        icon: const Icon(Icons.upload_file, size: 18),
+                                        label: Text("Upload CSV / Excel (Bulk Enroll)", style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                                        onPressed: () => _pickAndUploadCsv(cls["id"], cls["name"]),
+                                      ),
                                     ),
                                   ],
                                 ),

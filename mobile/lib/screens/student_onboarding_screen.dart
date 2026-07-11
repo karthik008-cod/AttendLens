@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -45,11 +46,38 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
     }
   }
 
-  // ── Add Student Flow ───────────────────────────────────────────────────────
+  Future<void> _pickAndUploadCsv() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv', 'xlsx', 'xls', 'txt'],
+      );
+      if (result != null && result.files.single.path != null) {
+        final file = File(result.files.single.path!);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('⚡ Uploading and enrolling students from CSV/Excel...'), backgroundColor: AttendLensTheme.primaryIndigo),
+          );
+        }
+        final res = await ApiService.uploadStudentsCsv(widget.classId, file);
+        final count = res['created_count'] ?? 0;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✅ Successfully enrolled $count students from CSV!'), backgroundColor: Colors.green, duration: const Duration(seconds: 4)),
+          );
+          _loadStudents();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
 
-  void _showAddStudentFlow() {
-    final nameCtrl = TextEditingController();
-    final rollCtrl = TextEditingController();
+  void _showAddPhotosModal(dynamic student) {
     List<File?> photos = List.filled(widget.requiredPhotos, null);
     bool isUploading = false;
     String? errorMsg;
@@ -62,7 +90,7 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModal) {
           int capturedCount = photos.where((p) => p != null).length;
-          bool allDone = capturedCount == widget.requiredPhotos;
+          bool allDone = capturedCount > 0; // At least 1 photo
 
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 20, left: 24, right: 24, top: 24),
@@ -70,42 +98,21 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Handle
                 Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
                 const SizedBox(height: 20),
-
-                Text('Enroll Student', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
-                Text('Face photos power automatic attendance recognition.', style: GoogleFonts.outfit(fontSize: 13, color: AttendLensTheme.textSecondary)),
+                Text('Add Photos for ${student['name']}', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                Text('Roll: ${student['roll_number']} • Capture ${widget.requiredPhotos} clear face photos to power recognition.', style: GoogleFonts.outfit(fontSize: 13, color: AttendLensTheme.textSecondary)),
                 const SizedBox(height: 20),
-
-                // Name
-                TextField(
-                  controller: nameCtrl,
-                  style: GoogleFonts.outfit(color: Colors.white),
-                  textCapitalization: TextCapitalization.words,
-                  decoration: _inputDeco('Full Name', Icons.person_outline),
-                ),
-                const SizedBox(height: 14),
-
-                // Roll number
-                TextField(
-                  controller: rollCtrl,
-                  style: GoogleFonts.outfit(color: Colors.white),
-                  decoration: _inputDeco('Roll Number / Student ID', Icons.badge_outlined),
-                ),
-                const SizedBox(height: 20),
-
-                // Photo grid
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('Face Photos', style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AttendLensTheme.textSecondary)),
-                    Text('$capturedCount / ${widget.requiredPhotos}', style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.bold, color: allDone ? AttendLensTheme.statusPresent : AttendLensTheme.accentCyan)),
+                    Text('$capturedCount / ${widget.requiredPhotos}', style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.bold, color: capturedCount == widget.requiredPhotos ? AttendLensTheme.statusPresent : AttendLensTheme.accentCyan)),
                   ],
                 ),
                 const SizedBox(height: 10),
                 SizedBox(
-                  height: 84,
+                  height: 90,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: widget.requiredPhotos,
@@ -121,33 +128,15 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                             imageQuality: 75,
                           );
                           if (picked != null) {
-                            final file = File(picked.path);
                             setModal(() {
-                              photos[i] = file;
-                              errorMsg = '⚡ Analyzing photo quality & lighting...';
+                              photos[i] = File(picked.path);
+                              errorMsg = null;
                             });
-                            try {
-                              final qRes = await ApiService.checkPhotoQuality(file);
-                              setModal(() {
-                                if (qRes['is_good'] == false && qRes['warning_message'] != null) {
-                                  errorMsg = qRes['warning_message'].toString();
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text(qRes['warning_message'].toString()), backgroundColor: Colors.orange.shade800, duration: const Duration(seconds: 4)),
-                                    );
-                                  }
-                                } else {
-                                  errorMsg = null;
-                                }
-                              });
-                            } catch (_) {
-                              setModal(() => errorMsg = null);
-                            }
                           }
                         },
                         child: Container(
                           width: 80, height: 80,
-                          margin: const EdgeInsets.only(right: 10),
+                          margin: const EdgeInsets.only(right: 12),
                           decoration: BoxDecoration(
                             color: AttendLensTheme.backgroundDark,
                             borderRadius: BorderRadius.circular(14),
@@ -172,97 +161,322 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                     },
                   ),
                 ),
-
                 if (errorMsg != null) ...[
                   const SizedBox(height: 12),
                   Text(errorMsg!, style: GoogleFonts.outfit(color: AttendLensTheme.statusAbsent, fontSize: 13)),
                 ],
-
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: allDone ? AttendLensTheme.primaryIndigo : Colors.grey.shade800,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        onPressed: (isUploading || !allDone) ? null : () async {
-                          if (nameCtrl.text.isEmpty || rollCtrl.text.isEmpty) {
-                            setModal(() => errorMsg = 'Please fill name and roll number');
-                            return;
-                          }
-                          if (_students.any((s) => s['roll_number'].toString().trim().toLowerCase() == rollCtrl.text.trim().toLowerCase())) {
-                            setModal(() => errorMsg = 'Duplicate Roll No: Student with roll number "${rollCtrl.text.trim()}" already exists in this class!');
-                            return;
-                          }
-                          setModal(() => isUploading = true);
-                          try {
-                            final validPhotos = photos.whereType<File>().toList();
-                            await ApiService.addStudentBatch(nameCtrl.text, rollCtrl.text, widget.classId, validPhotos);
-                            _loadStudents();
-                            setModal(() {
-                              isUploading = false;
-                              nameCtrl.clear();
-                              rollCtrl.clear();
-                              for (int i = 0; i < photos.length; i++) photos[i] = null;
-                            });
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('⚡ Student saved! Ready for next student.'), backgroundColor: Colors.green, duration: Duration(seconds: 2)),
-                              );
-                            }
-                          } catch (e) {
-                            setModal(() {
-                              isUploading = false;
-                              errorMsg = e.toString().replaceAll('Exception: ', '');
-                            });
-                          }
-                        },
-                        child: isUploading
-                            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                            : Text('Save & Add Next ⚡', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
-                      ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: allDone ? AttendLensTheme.primaryIndigo : Colors.grey.shade800,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 2,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: allDone ? AttendLensTheme.accentCyan : Colors.grey.shade800, width: 1.5),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        onPressed: (isUploading || !allDone) ? null : () async {
-                          if (nameCtrl.text.isEmpty || rollCtrl.text.isEmpty) {
-                            setModal(() => errorMsg = 'Please fill name and roll number');
-                            return;
-                          }
-                          if (_students.any((s) => s['roll_number'].toString().trim().toLowerCase() == rollCtrl.text.trim().toLowerCase())) {
-                            setModal(() => errorMsg = 'Duplicate Roll No: Student with roll number "${rollCtrl.text.trim()}" already exists in this class!');
-                            return;
-                          }
-                          setModal(() => isUploading = true);
-                          try {
-                            final validPhotos = photos.whereType<File>().toList();
-                            await ApiService.addStudentBatch(nameCtrl.text, rollCtrl.text, widget.classId, validPhotos);
-                            _loadStudents();
-                            if (mounted) Navigator.pop(ctx);
-                          } catch (e) {
-                            setModal(() {
-                              isUploading = false;
-                              errorMsg = e.toString().replaceAll('Exception: ', '');
-                            });
-                          }
-                        },
-                        child: Text('Save & Close', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: allDone ? AttendLensTheme.accentCyan : Colors.grey)),
-                      ),
-                    ),
-                  ],
+                    onPressed: (isUploading || !allDone) ? null : () async {
+                      setModal(() => isUploading = true);
+                      try {
+                        final validPhotos = photos.whereType<File>().toList();
+                        await ApiService.addStudentPhotosBatch(student['id'], validPhotos);
+                        _loadStudents();
+                        if (mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('⚡ ${validPhotos.length} photos added for ${student['name']}! Face vector updated.'), backgroundColor: Colors.green, duration: const Duration(seconds: 3)),
+                          );
+                        }
+                      } catch (e) {
+                        setModal(() {
+                          isUploading = false;
+                          errorMsg = e.toString().replaceAll('Exception: ', '');
+                        });
+                      }
+                    },
+                    child: isUploading
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                        : Text('Save Photos & Enroll Face ⚡', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                  ),
                 ),
               ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Add Student Flow ───────────────────────────────────────────────────────
+
+  void _showAddStudentFlow() {
+    final nameCtrl = TextEditingController();
+    final rollCtrl = TextEditingController();
+    final dobCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final villageCtrl = TextEditingController();
+    List<File?> photos = List.filled(widget.requiredPhotos, null);
+    bool isUploading = false;
+    String? errorMsg;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AttendLensTheme.surfaceDark,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          int capturedCount = photos.where((p) => p != null).length;
+          bool allDone = capturedCount == widget.requiredPhotos;
+
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 20, left: 24, right: 24, top: 24),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Handle
+                  Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+                  const SizedBox(height: 20),
+
+                  Text('Enroll Student', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+                  Text('Face photos power automatic attendance recognition.', style: GoogleFonts.outfit(fontSize: 13, color: AttendLensTheme.textSecondary)),
+                  const SizedBox(height: 20),
+
+                  // Name
+                  TextField(
+                    controller: nameCtrl,
+                    style: GoogleFonts.outfit(color: Colors.white),
+                    textCapitalization: TextCapitalization.words,
+                    decoration: _inputDeco('Full Name', Icons.person_outline),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Roll number
+                  TextField(
+                    controller: rollCtrl,
+                    style: GoogleFonts.outfit(color: Colors.white),
+                    decoration: _inputDeco('Roll Number / Student ID', Icons.badge_outlined),
+                  ),
+                  const SizedBox(height: 14),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: dobCtrl,
+                          style: GoogleFonts.outfit(color: Colors.white),
+                          decoration: _inputDeco('DOB (YYYY-MM-DD)', Icons.calendar_today_outlined),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: phoneCtrl,
+                          style: GoogleFonts.outfit(color: Colors.white),
+                          keyboardType: TextInputType.phone,
+                          decoration: _inputDeco('Phone No', Icons.phone_outlined),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  TextField(
+                    controller: villageCtrl,
+                    style: GoogleFonts.outfit(color: Colors.white),
+                    decoration: _inputDeco('Village / Town', Icons.location_on_outlined),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Photo grid
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Face Photos', style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AttendLensTheme.textSecondary)),
+                      Text('$capturedCount / ${widget.requiredPhotos}', style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.bold, color: allDone ? AttendLensTheme.statusPresent : AttendLensTheme.accentCyan)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 84,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: widget.requiredPhotos,
+                      itemBuilder: (_, i) {
+                        final photo = photos[i];
+                        return GestureDetector(
+                          onTap: () async {
+                            final picked = await _picker.pickImage(
+                              source: ImageSource.camera,
+                              preferredCameraDevice: CameraDevice.front,
+                              maxWidth: 800,
+                              maxHeight: 800,
+                              imageQuality: 75,
+                            );
+                            if (picked != null) {
+                              final file = File(picked.path);
+                              setModal(() {
+                                photos[i] = file;
+                                errorMsg = '⚡ Analyzing photo quality & lighting...';
+                              });
+                              try {
+                                final qRes = await ApiService.checkPhotoQuality(file);
+                                setModal(() {
+                                  if (qRes['is_good'] == false && qRes['warning_message'] != null) {
+                                    errorMsg = qRes['warning_message'].toString();
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text(qRes['warning_message'].toString()), backgroundColor: Colors.orange.shade800, duration: const Duration(seconds: 4)),
+                                      );
+                                    }
+                                  } else {
+                                    errorMsg = null;
+                                  }
+                                });
+                              } catch (_) {
+                                setModal(() => errorMsg = null);
+                              }
+                            }
+                          },
+                          child: Container(
+                            width: 80, height: 80,
+                            margin: const EdgeInsets.only(right: 10),
+                            decoration: BoxDecoration(
+                              color: AttendLensTheme.backgroundDark,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: photo != null ? AttendLensTheme.statusPresent : AttendLensTheme.primaryIndigo.withOpacity(0.5), width: 2),
+                              image: photo != null ? DecorationImage(image: FileImage(photo), fit: BoxFit.cover) : null,
+                            ),
+                            child: photo == null
+                                ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                    const Icon(Icons.camera_alt_outlined, color: AttendLensTheme.primaryIndigo, size: 24),
+                                    const SizedBox(height: 4),
+                                    Text('${i + 1}', style: GoogleFonts.outfit(fontSize: 11, color: AttendLensTheme.textSecondary)),
+                                  ])
+                                : Align(
+                                    alignment: Alignment.topRight,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(4),
+                                      child: Icon(Icons.check_circle, color: AttendLensTheme.statusPresent, size: 18, shadows: const [Shadow(blurRadius: 4, color: Colors.black)]),
+                                    ),
+                                  ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  if (errorMsg != null) ...[
+                    const SizedBox(height: 12),
+                    Text(errorMsg!, style: GoogleFonts.outfit(color: AttendLensTheme.statusAbsent, fontSize: 13)),
+                  ],
+
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: allDone ? AttendLensTheme.primaryIndigo : Colors.grey.shade800,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          onPressed: (isUploading || !allDone) ? null : () async {
+                            if (nameCtrl.text.isEmpty || rollCtrl.text.isEmpty) {
+                              setModal(() => errorMsg = 'Please fill name and roll number');
+                              return;
+                            }
+                            if (_students.any((s) => s['roll_number'].toString().trim().toLowerCase() == rollCtrl.text.trim().toLowerCase())) {
+                              setModal(() => errorMsg = 'Duplicate Roll No: Student with roll number "${rollCtrl.text.trim()}" already exists in this class!');
+                              return;
+                            }
+                            setModal(() => isUploading = true);
+                            try {
+                              final validPhotos = photos.whereType<File>().toList();
+                              await ApiService.addStudentBatch(
+                                nameCtrl.text,
+                                rollCtrl.text,
+                                widget.classId,
+                                validPhotos,
+                                dob: dobCtrl.text,
+                                phone: phoneCtrl.text,
+                                village: villageCtrl.text,
+                              );
+                              _loadStudents();
+                              setModal(() {
+                                isUploading = false;
+                                nameCtrl.clear();
+                                rollCtrl.clear();
+                                dobCtrl.clear();
+                                phoneCtrl.clear();
+                                villageCtrl.clear();
+                                for (int i = 0; i < photos.length; i++) photos[i] = null;
+                              });
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('⚡ Student saved! Ready for next student.'), backgroundColor: Colors.green, duration: Duration(seconds: 2)),
+                                );
+                              }
+                            } catch (e) {
+                              setModal(() {
+                                isUploading = false;
+                                errorMsg = e.toString().replaceAll('Exception: ', '');
+                              });
+                            }
+                          },
+                          child: isUploading
+                              ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                              : Text('Save & Add Next ⚡', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: allDone ? AttendLensTheme.accentCyan : Colors.grey.shade800, width: 1.5),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          onPressed: (isUploading || !allDone) ? null : () async {
+                            if (nameCtrl.text.isEmpty || rollCtrl.text.isEmpty) {
+                              setModal(() => errorMsg = 'Please fill name and roll number');
+                              return;
+                            }
+                            if (_students.any((s) => s['roll_number'].toString().trim().toLowerCase() == rollCtrl.text.trim().toLowerCase())) {
+                              setModal(() => errorMsg = 'Duplicate Roll No: Student with roll number "${rollCtrl.text.trim()}" already exists in this class!');
+                              return;
+                            }
+                            setModal(() => isUploading = true);
+                            try {
+                              final validPhotos = photos.whereType<File>().toList();
+                              await ApiService.addStudentBatch(
+                                nameCtrl.text,
+                                rollCtrl.text,
+                                widget.classId,
+                                validPhotos,
+                                dob: dobCtrl.text,
+                                phone: phoneCtrl.text,
+                                village: villageCtrl.text,
+                              );
+                              _loadStudents();
+                              if (mounted) Navigator.pop(ctx);
+                            } catch (e) {
+                              setModal(() {
+                                isUploading = false;
+                                errorMsg = e.toString().replaceAll('Exception: ', '');
+                              });
+                            }
+                          },
+                          child: Text('Save & Close', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: allDone ? AttendLensTheme.accentCyan : Colors.grey)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -275,6 +489,9 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
   void _showEditSheet(dynamic student) {
     final nameCtrl = TextEditingController(text: student['name']);
     final rollCtrl = TextEditingController(text: student['roll_number']);
+    final dobCtrl = TextEditingController(text: student['dob'] ?? '');
+    final phoneCtrl = TextEditingController(text: student['phone'] ?? '');
+    final villageCtrl = TextEditingController(text: student['village'] ?? '');
     bool isSaving = false;
 
     showModalBottomSheet(
@@ -285,55 +502,78 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModal) => Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 20, left: 24, right: 24, top: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
-              const SizedBox(height: 20),
-              Text('Edit Student', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
-              const SizedBox(height: 20),
-              TextField(controller: nameCtrl, style: GoogleFonts.outfit(color: Colors.white), textCapitalization: TextCapitalization.words, decoration: _inputDeco('Full Name', Icons.person_outline)),
-              const SizedBox(height: 14),
-              TextField(controller: rollCtrl, style: GoogleFonts.outfit(color: Colors.white), decoration: _inputDeco('Roll Number', Icons.badge_outlined)),
-              const SizedBox(height: 24),
-              Row(children: [
-                // Delete button
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(foregroundColor: AttendLensTheme.statusAbsent, side: const BorderSide(color: AttendLensTheme.statusAbsent), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-                    icon: const Icon(Icons.delete_outline, size: 18),
-                    label: Text('Delete', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      _confirmDelete(student);
-                    },
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+                const SizedBox(height: 20),
+                Text('Edit Student', style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+                const SizedBox(height: 20),
+                TextField(controller: nameCtrl, style: GoogleFonts.outfit(color: Colors.white), textCapitalization: TextCapitalization.words, decoration: _inputDeco('Full Name', Icons.person_outline)),
+                const SizedBox(height: 14),
+                TextField(controller: rollCtrl, style: GoogleFonts.outfit(color: Colors.white), decoration: _inputDeco('Roll Number', Icons.badge_outlined)),
+                const SizedBox(height: 14),
+                Row(children: [
+                  Expanded(child: TextField(controller: dobCtrl, style: GoogleFonts.outfit(color: Colors.white), decoration: _inputDeco('DOB', Icons.calendar_today_outlined))),
+                  const SizedBox(width: 10),
+                  Expanded(child: TextField(controller: phoneCtrl, style: GoogleFonts.outfit(color: Colors.white), keyboardType: TextInputType.phone, decoration: _inputDeco('Phone', Icons.phone_outlined))),
+                ]),
+                const SizedBox(height: 14),
+                TextField(controller: villageCtrl, style: GoogleFonts.outfit(color: Colors.white), decoration: _inputDeco('Village / Town', Icons.location_on_outlined)),
+                const SizedBox(height: 24),
+                Row(children: [
+                  // Delete button
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(foregroundColor: AttendLensTheme.statusAbsent, side: const BorderSide(color: AttendLensTheme.statusAbsent), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      label: Text('Delete', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        _confirmDelete(student);
+                      },
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                // Save button
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: AttendLensTheme.primaryIndigo, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-                    onPressed: isSaving ? null : () async {
-                      setModal(() => isSaving = true);
-                      try {
-                        await ApiService.updateStudent(student['id'], name: nameCtrl.text, rollNumber: rollCtrl.text);
-                        _loadStudents();
-                      } catch (_) {
-                        setState(() {
-                          final idx = _students.indexWhere((s) => s['id'] == student['id']);
-                          if (idx >= 0) { _students[idx]['name'] = nameCtrl.text; _students[idx]['roll_number'] = rollCtrl.text; }
-                        });
-                      }
-                      if (mounted) Navigator.pop(ctx);
-                    },
-                    child: isSaving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : Text('Save Changes', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 12),
+                  // Save button
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: AttendLensTheme.primaryIndigo, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                      onPressed: isSaving ? null : () async {
+                        setModal(() => isSaving = true);
+                        try {
+                          await ApiService.updateStudent(
+                            student['id'],
+                            name: nameCtrl.text,
+                            rollNumber: rollCtrl.text,
+                            dob: dobCtrl.text,
+                            phone: phoneCtrl.text,
+                            village: villageCtrl.text,
+                          );
+                          _loadStudents();
+                        } catch (_) {
+                          setState(() {
+                            final idx = _students.indexWhere((s) => s['id'] == student['id']);
+                            if (idx >= 0) {
+                              _students[idx]['name'] = nameCtrl.text;
+                              _students[idx]['roll_number'] = rollCtrl.text;
+                              _students[idx]['dob'] = dobCtrl.text;
+                              _students[idx]['phone'] = phoneCtrl.text;
+                              _students[idx]['village'] = villageCtrl.text;
+                            }
+                          });
+                        }
+                        if (mounted) Navigator.pop(ctx);
+                      },
+                      child: isSaving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : Text('Save Changes', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                    ),
                   ),
-                ),
-              ]),
-            ],
+                ]),
+              ],
+            ),
           ),
         ),
       ),
@@ -495,25 +735,45 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
       appBar: AppBar(
         title: Text(widget.className),
         actions: [
+          IconButton(icon: const Icon(Icons.upload_file, color: AttendLensTheme.accentCyan), onPressed: _pickAndUploadCsv, tooltip: 'Upload CSV / Excel (Bulk Enroll)'),
           IconButton(icon: const Icon(Icons.qr_code_2, color: AttendLensTheme.accentCyan), onPressed: _showInviteDialog, tooltip: 'Student Self-Register Link'),
           IconButton(icon: const Icon(Icons.refresh, color: Colors.grey), onPressed: _loadStudents),
         ],
       ),
       body: Column(
         children: [
-          // Banner
+          // Banner & Bulk Action Row
           Container(
             margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
             padding: const EdgeInsets.all(16),
             decoration: AttendLensTheme.glassDecoration,
-            child: Row(children: [
-              const Icon(Icons.face_retouching_natural, color: AttendLensTheme.primaryIndigo, size: 34),
-              const SizedBox(width: 14),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${_students.length} Students Enrolled', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                Text('${widget.requiredPhotos} photo(s) required • Long-press to edit', style: GoogleFonts.outfit(fontSize: 11, color: AttendLensTheme.textSecondary)),
-              ])),
-            ]),
+            child: Column(
+              children: [
+                Row(children: [
+                  const Icon(Icons.face_retouching_natural, color: AttendLensTheme.primaryIndigo, size: 34),
+                  const SizedBox(width: 14),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('${_students.length} Students Enrolled', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                    Text('${widget.requiredPhotos} photo(s) required per student • Long-press to edit', style: GoogleFonts.outfit(fontSize: 11, color: AttendLensTheme.textSecondary)),
+                  ])),
+                ]),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AttendLensTheme.accentCyan,
+                      side: const BorderSide(color: AttendLensTheme.accentCyan, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.upload_file, size: 18),
+                    label: Text("Upload CSV / Excel (Bulk Add Students)", style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 13)),
+                    onPressed: _pickAndUploadCsv,
+                  ),
+                ),
+              ],
+            ),
           ),
 
           // List
@@ -526,14 +786,15 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                         const SizedBox(height: 12),
                         Text('No students yet', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
                         const SizedBox(height: 6),
-                        Text('Tap + below to enroll the first student', style: GoogleFonts.outfit(fontSize: 13, color: AttendLensTheme.textSecondary)),
+                        Text('Tap "+ Enroll Student" below or "Upload CSV" above!', style: GoogleFonts.outfit(fontSize: 13, color: AttendLensTheme.textSecondary)),
                       ]))
                     : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 80),
                         itemCount: _students.length,
                         itemBuilder: (_, i) {
                           final st = _students[i];
                           final photoCount = st['photo_count'] as int? ?? 0;
+                          final done = photoCount >= widget.requiredPhotos;
                           return GestureDetector(
                             onLongPress: () => _showEditSheet(st),
                             child: Dismissible(
@@ -571,21 +832,64 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                               },
                               child: Card(
                                 margin: const EdgeInsets.only(bottom: 12),
-                                child: ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                  leading: CircleAvatar(
-                                    radius: 24,
-                                    backgroundColor: AttendLensTheme.primaryIndigo.withOpacity(0.2),
-                                    child: Text(st['name'][0].toUpperCase(), style: GoogleFonts.outfit(color: AttendLensTheme.primaryIndigo, fontWeight: FontWeight.bold, fontSize: 18)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                color: AttendLensTheme.surfaceDark,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(14),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          CircleAvatar(
+                                            radius: 24,
+                                            backgroundColor: AttendLensTheme.primaryIndigo.withOpacity(0.2),
+                                            child: Text(st['name'][0].toUpperCase(), style: GoogleFonts.outfit(color: AttendLensTheme.primaryIndigo, fontWeight: FontWeight.bold, fontSize: 18)),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(st['name'], style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16)),
+                                                const SizedBox(height: 3),
+                                                Text('Roll: ${st['roll_number']}${st['village'] != null && st['village'].toString().isNotEmpty ? ' • ${st['village']}' : ''}', style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 12)),
+                                                if (st['phone'] != null && st['phone'].toString().isNotEmpty)
+                                                  Text('📞 ${st['phone']}', style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 11)),
+                                              ],
+                                            ),
+                                          ),
+                                          _photoBadge(photoCount, widget.requiredPhotos),
+                                          const SizedBox(width: 4),
+                                          IconButton(
+                                            icon: const Icon(Icons.edit_outlined, color: Colors.grey, size: 20),
+                                            onPressed: () => _showEditSheet(st),
+                                            constraints: const BoxConstraints(),
+                                            padding: const EdgeInsets.all(6),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: ElevatedButton.icon(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: done ? AttendLensTheme.backgroundDark : AttendLensTheme.primaryIndigo,
+                                                foregroundColor: done ? AttendLensTheme.accentCyan : Colors.white,
+                                                side: done ? BorderSide(color: AttendLensTheme.accentCyan.withOpacity(0.6)) : null,
+                                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                              ),
+                                              icon: Icon(done ? Icons.check_circle_outline : Icons.add_a_photo_outlined, size: 18),
+                                              label: Text(done ? "Add / Replace Photos ($photoCount)" : "+ Add Photos (Enroll Face)", style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 13)),
+                                              onPressed: () => _showAddPhotosModal(st),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
                                   ),
-                                  title: Text(st['name'], style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600)),
-                                  subtitle: Text('Roll: ${st['roll_number']}', style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 12)),
-                                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                    _photoBadge(photoCount, widget.requiredPhotos),
-                                    const SizedBox(width: 8),
-                                    const Icon(Icons.more_vert, color: Colors.grey, size: 20),
-                                  ]),
-                                  onTap: () => _showEditSheet(st),
                                 ),
                               ),
                             ),

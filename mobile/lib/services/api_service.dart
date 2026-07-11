@@ -188,12 +188,18 @@ class ApiService {
     String name,
     String rollNumber,
     int classroomId,
-    File? photo,
-  ) async {
+    File? photo, {
+    String? dob,
+    String? phone,
+    String? village,
+  }) async {
     var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/students'));
     request.fields['name'] = name;
     request.fields['roll_number'] = rollNumber;
     request.fields['classroom_id'] = classroomId.toString();
+    if (dob != null && dob.isNotEmpty) request.fields['dob'] = dob;
+    if (phone != null && phone.isNotEmpty) request.fields['phone'] = phone;
+    if (village != null && village.isNotEmpty) request.fields['village'] = village;
     if (photo != null && await photo.exists()) {
       request.files.add(await http.MultipartFile.fromPath('photo', photo.path));
     }
@@ -213,12 +219,18 @@ class ApiService {
     String name,
     String rollNumber,
     int classroomId,
-    List<File> photos,
-  ) async {
+    List<File> photos, {
+    String? dob,
+    String? phone,
+    String? village,
+  }) async {
     var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/students/batch'));
     request.fields['name'] = name;
     request.fields['roll_number'] = rollNumber;
     request.fields['classroom_id'] = classroomId.toString();
+    if (dob != null && dob.isNotEmpty) request.fields['dob'] = dob;
+    if (phone != null && phone.isNotEmpty) request.fields['phone'] = phone;
+    if (village != null && village.isNotEmpty) request.fields['village'] = village;
     for (final photo in photos) {
       if (await photo.exists()) {
         request.files.add(await http.MultipartFile.fromPath('photos', photo.path));
@@ -236,6 +248,42 @@ class ApiService {
     throw Exception('Failed to add student in batch: ${res.body}');
   }
 
+  static Future<Map<String, dynamic>> uploadStudentsCsv(int classId, File csvFile) async {
+    var request = http.MultipartRequest(
+        'POST', Uri.parse('$baseUrl/classes/$classId/students/upload_csv'));
+    request.files.add(await http.MultipartFile.fromPath('file', csvFile.path));
+    final streamed = await request.send().timeout(const Duration(seconds: 60));
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 200) return json.decode(res.body);
+    try {
+      final errData = json.decode(res.body);
+      if (errData['detail'] != null) throw Exception(errData['detail']);
+    } catch (e) {
+      if (e.toString().contains('Exception: ')) rethrow;
+    }
+    throw Exception('Failed to upload CSV: ${res.body}');
+  }
+
+  static Future<Map<String, dynamic>> addStudentPhotosBatch(int studentId, List<File> photos) async {
+    var request = http.MultipartRequest(
+        'POST', Uri.parse('$baseUrl/students/$studentId/photos/batch'));
+    for (final photo in photos) {
+      if (await photo.exists()) {
+        request.files.add(await http.MultipartFile.fromPath('photos', photo.path));
+      }
+    }
+    final streamed = await request.send().timeout(const Duration(seconds: 60));
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 200) return json.decode(res.body);
+    try {
+      final errData = json.decode(res.body);
+      if (errData['detail'] != null) throw Exception(errData['detail']);
+    } catch (e) {
+      if (e.toString().contains('Exception: ')) rethrow;
+    }
+    throw Exception('Failed to upload photos: ${res.body}');
+  }
+
   static Future<void> addStudentPhoto(int studentId, File photo) async {
     var request = http.MultipartRequest(
         'POST', Uri.parse('$baseUrl/students/$studentId/photos'));
@@ -249,6 +297,9 @@ class ApiService {
     int studentId, {
     String? name,
     String? rollNumber,
+    String? dob,
+    String? phone,
+    String? village,
   }) async {
     final res = await http.put(
       Uri.parse('$baseUrl/students/$studentId'),
@@ -256,6 +307,9 @@ class ApiService {
       body: json.encode({
         if (name != null) 'name': name,
         if (rollNumber != null) 'roll_number': rollNumber,
+        if (dob != null) 'dob': dob,
+        if (phone != null) 'phone': phone,
+        if (village != null) 'village': village,
       }),
     );
     if (res.statusCode == 200) return json.decode(res.body);

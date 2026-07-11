@@ -113,7 +113,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(22),
-                        child: Image.asset('assets/logo.jpg', width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Center(child: Text('🎥', style: TextStyle(fontSize: 38)))),
+                        child: Image.asset('assets/logo.jpg', width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.lens, color: AttendLensTheme.accentCyan, size: 38))),
                       ),
                     ),
                   ),

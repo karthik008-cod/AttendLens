@@ -72,20 +72,29 @@ class _SplashRouterState extends State<_SplashRouter> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 100, height: 100,
+              width: 110, height: 110,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)]),
                 borderRadius: BorderRadius.circular(28),
-                boxShadow: [BoxShadow(color: const Color(0xFF6366F1).withOpacity(0.5), blurRadius: 32, offset: const Offset(0, 12))],
+                boxShadow: [BoxShadow(color: AttendLensTheme.primaryIndigo.withOpacity(0.35), blurRadius: 28, offset: const Offset(0, 10))],
               ),
-              child: const Center(child: Text('🎥', style: TextStyle(fontSize: 48))),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(28),
+                child: Image.asset(
+                  'assets/logo.jpg',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    color: AttendLensTheme.surfaceDark,
+                    child: const Icon(Icons.lens, color: AttendLensTheme.accentCyan, size: 48),
+                  ),
+                ),
+              ),
             ),
             const SizedBox(height: 24),
             const Text('AttendLens', style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5)),
             const SizedBox(height: 6),
-            const Text('AI-Powered Attendance', style: TextStyle(fontSize: 14, color: Color(0xFF94A3B8))),
+            const Text('Teach More. Track Less.', style: TextStyle(fontSize: 14, color: Color(0xFF94A3B8))),
             const SizedBox(height: 48),
-            const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(color: Color(0xFF6366F1), strokeWidth: 2.5)),
+            const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(color: AttendLensTheme.primaryIndigo, strokeWidth: 2.5)),
           ],
         ),
       ),

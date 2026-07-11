@@ -2,6 +2,8 @@ import os
 import shutil
 import json
 import asyncio
+import csv
+import io
 import numpy as np
 from typing import List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
@@ -73,6 +75,11 @@ class ClassroomUpdate(BaseModel):
 class StudentUpdate(BaseModel):
     name: Optional[str] = None
     roll_number: Optional[str] = None
+    dob: Optional[str] = None
+    phone: Optional[str] = None
+    village: Optional[str] = None
+    parent_phone: Optional[str] = None
+    parent_email: Optional[str] = None
 
 class AttendanceConfirmRequest(BaseModel):
     classroom_id: int
@@ -116,6 +123,9 @@ def _student_dict(s: dict, db=None) -> dict:
         "id": s.get("id"),
         "name": s.get("name"),
         "roll_number": s.get("roll_number"),
+        "dob": s.get("dob", ""),
+        "phone": s.get("phone", ""),
+        "village": s.get("village", ""),
         "photo_path": s.get("photo_path"),
         "photo_count": photo_count,
     }
@@ -325,6 +335,9 @@ async def add_student(
     name: str = Form(...),
     roll_number: str = Form(...),
     classroom_id: int = Form(...),
+    dob: Optional[str] = Form(""),
+    phone: Optional[str] = Form(""),
+    village: Optional[str] = Form(""),
     photo: Optional[UploadFile] = File(None),
     db = Depends(get_db),
 ):
@@ -353,6 +366,9 @@ async def add_student(
         "id": s_id,
         "name": name.strip(),
         "roll_number": roll_clean,
+        "dob": str(dob).strip() if dob else "",
+        "phone": str(phone).strip() if phone else "",
+        "village": str(village).strip() if village else "",
         "classroom_id": classroom_id,
         "photo_path": photo_path,
         "face_encoding": "processing...",
@@ -374,6 +390,9 @@ async def add_student_batch(
     name: str = Form(...),
     roll_number: str = Form(...),
     classroom_id: int = Form(...),
+    dob: Optional[str] = Form(""),
+    phone: Optional[str] = Form(""),
+    village: Optional[str] = Form(""),
     photos: List[UploadFile] = File(...),
     db = Depends(get_db),
 ):
@@ -405,8 +424,11 @@ async def add_student_batch(
     s_id = get_next_id("students")
     student = {
         "id": s_id,
-        "name": name,
-        "roll_number": roll_number,
+        "name": name.strip(),
+        "roll_number": roll_clean,
+        "dob": str(dob).strip() if dob else "",
+        "phone": str(phone).strip() if phone else "",
+        "village": str(village).strip() if village else "",
         "classroom_id": classroom_id,
         "photo_path": file_paths[0] if file_paths else None,
         "face_encoding": "processing...",
@@ -422,6 +444,160 @@ async def add_student_batch(
 
     student = db.students.find_one({"id": s_id})
     return _student_dict(student, db)
+
+
+@router.post("/classes/{class_id}/students/upload_csv")
+@router.post("/classes/{class_id}/students/upload_file")
+async def upload_students_csv(
+    class_id: int,
+    file: UploadFile = File(...),
+    db = Depends(get_db),
+):
+    """Upload a CSV or Excel (.xlsx/.xls) file to bulk create students without photos initially."""
+    classroom = db.classrooms.find_one({"id": class_id})
+    if not classroom:
+        raise HTTPException(status_code=404, detail="Classroom not found")
+
+    content = await file.read()
+    await file.close()
+
+    rows = []
+    fname = (file.filename or "").lower()
+
+    # Try Excel parsing first if filename indicates Excel or if content starts with PK/zip signature
+    if fname.endswith(".xlsx") or fname.endswith(".xls") or content.startswith(b"PK\x03\x04"):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+            ws = wb.active
+            for r in ws.iter_rows(values_only=True):
+                # Convert tuple values to string or empty string
+                rows.append([str(c).strip() if c is not None else "" for c in r])
+        except Exception as e:
+            # If Excel fails, fall back to trying CSV decode below
+            pass
+
+    # If rows not populated by Excel parser, parse as CSV/TSV
+    if not rows:
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            try:
+                text = content.decode("latin-1")
+            except Exception:
+                raise HTTPException(status_code=400, detail="Unable to decode file encoding. Please upload a valid CSV or Excel file.")
+
+        reader = csv.reader(io.StringIO(text))
+        rows = list(reader)
+
+    if not rows or len(rows) < 2:
+        raise HTTPException(status_code=400, detail="File is empty or missing data rows (need at least header row + 1 student row).")
+
+    header = [str(c).strip().lower() for c in rows[0]]
+    
+    # Smart column mapping
+    name_col = next((i for i, h in enumerate(header) if "name" in h or "student" in h), -1)
+    roll_col = next((i for i, h in enumerate(header) if "roll" in h or "id" in h or "reg" in h), -1)
+    dob_col = next((i for i, h in enumerate(header) if "dob" in h or "birth" in h or "date" in h), -1)
+    phone_col = next((i for i, h in enumerate(header) if "phone" in h or "mobile" in h or "contact" in h), -1)
+    village_col = next((i for i, h in enumerate(header) if "village" in h or "city" in h or "address" in h or "location" in h), -1)
+
+    if name_col == -1 or roll_col == -1:
+        # Fallback to positional: 0 -> Name, 1 -> Roll No, 2 -> DOB, 3 -> Phone, 4 -> Village
+        name_col = 0 if len(header) > 0 else -1
+        roll_col = 1 if len(header) > 1 else -1
+        dob_col = 2 if len(header) > 2 else -1
+        phone_col = 3 if len(header) > 3 else -1
+        village_col = 4 if len(header) > 4 else -1
+
+    existing_students = list(db.students.find({"classroom_id": class_id}))
+    existing_rolls = {str(s.get("roll_number", "")).strip().lower() for s in existing_students}
+
+    created_count = 0
+    created_list = []
+
+    for row in rows[1:]:
+        if not row or all(str(c).strip() == "" for c in row):
+            continue
+        s_name = str(row[name_col]).strip() if name_col >= 0 and name_col < len(row) else ""
+        s_roll = str(row[roll_col]).strip() if roll_col >= 0 and roll_col < len(row) else ""
+        s_dob = str(row[dob_col]).strip() if dob_col >= 0 and dob_col < len(row) else ""
+        s_phone = str(row[phone_col]).strip() if phone_col >= 0 and phone_col < len(row) else ""
+        s_village = str(row[village_col]).strip() if village_col >= 0 and village_col < len(row) else ""
+
+        if not s_name or not s_roll:
+            continue
+        
+        if s_roll.lower() in existing_rolls:
+            continue
+
+        s_id = get_next_id("students")
+        student_doc = {
+            "id": s_id,
+            "name": s_name,
+            "roll_number": s_roll,
+            "dob": s_dob,
+            "phone": s_phone,
+            "village": s_village,
+            "classroom_id": class_id,
+            "photo_path": None,
+            "face_encoding": None,
+        }
+        db.students.insert_one(student_doc)
+        existing_rolls.add(s_roll.lower())
+        created_count += 1
+        created_list.append(_student_dict(student_doc, db))
+
+    return {
+        "message": f"Successfully enrolled {created_count} students from file!",
+        "created_count": created_count,
+        "students": created_list
+    }
+
+
+@router.post("/students/{student_id}/photos/batch")
+async def add_student_photos_batch(
+    student_id: int,
+    photos: List[UploadFile] = File(...),
+    db = Depends(get_db),
+):
+    """Enroll photos for an existing student created via CSV bulk upload."""
+    s = db.students.find_one({"id": student_id})
+    if not s:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    if not photos or len(photos) == 0:
+        raise HTTPException(status_code=400, detail="At least 1 photo required")
+
+    file_paths = []
+    file_contents = []
+    for idx, photo in enumerate(photos):
+        safe_fname = os.path.basename(photo.filename or f"photo_{idx}.jpg")
+        file_path = os.path.join(UPLOAD_DIR, f"student_{student_id}_batch_{idx+1}_{safe_fname}")
+        content = await photo.read()
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+        await photo.close()
+        file_paths.append(file_path)
+        file_contents.append(content)
+
+        sp_id = get_next_id("student_photos")
+        db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": file_path, "face_encoding": "processing...", "photo_bytes": content})
+
+    if not s.get("photo_path") and file_paths:
+        db.students.update_one({"id": student_id}, {"$set": {"photo_path": file_paths[0]}})
+        s["photo_path"] = file_paths[0]
+
+    # Reprocess all photos for this student synchronously
+    all_photos = list(db.student_photos.find({"student_id": student_id}))
+    all_paths = [p["photo_path"] for p in all_photos if p.get("photo_path")]
+    _process_photos_sync(student_id, all_paths, db)
+
+    updated_s = db.students.find_one({"id": student_id})
+    return {
+        "message": f"Successfully added {len(photos)} photos and generated face encoding!",
+        "student": _student_dict(updated_s, db),
+    }
 
 
 @router.post("/students/{student_id}/photos")
@@ -470,6 +646,9 @@ def update_student(student_id: int, update: StudentUpdate, db = Depends(get_db))
     update_fields = {}
     if update.name is not None: update_fields["name"] = update.name
     if update.roll_number is not None: update_fields["roll_number"] = update.roll_number
+    if update.dob is not None: update_fields["dob"] = update.dob
+    if update.phone is not None: update_fields["phone"] = update.phone
+    if update.village is not None: update_fields["village"] = update.village
     if update.parent_phone is not None: update_fields["parent_phone"] = update.parent_phone
     if update.parent_email is not None: update_fields["parent_email"] = update.parent_email
     
