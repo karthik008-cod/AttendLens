@@ -659,9 +659,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
                   final present = s['present'] ?? 0;
                   final total = s['total'] ?? 0;
                   final pct = (s['percentage'] as num).toDouble();
-                  final phoneRaw = (s['phone'] ?? s['parent_phone'] ?? s['mobile'] ?? '').toString().trim();
+                  final phoneRaw = (s['parent_phone'] ?? s['phone'] ?? s['mobile'] ?? '').toString().trim();
                   String cleanDigits = phoneRaw.replaceAll(RegExp(r'[^0-9]'), '');
-                  if (cleanDigits.startsWith('0') && cleanDigits.length == 11) cleanDigits = cleanDigits.substring(1);
+                  while (cleanDigits.startsWith('0')) cleanDigits = cleanDigits.substring(1);
                   String smsPhone = cleanDigits.length == 10 ? '+91$cleanDigits' : cleanDigits;
 
                   final message = NudgeSettingsService.buildMessage(
@@ -690,7 +690,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
             ListTile(
               onTap: () {
                 final numbers = defaulters.map((s) {
-                  final p = (s['phone'] ?? s['parent_phone'] ?? '').toString().trim();
+                  final p = (s['parent_phone'] ?? s['phone'] ?? s['mobile'] ?? '').toString().trim();
                   return '${s['name']} (${s['roll_number']}): $p';
                 }).join('\n');
                 Clipboard.setData(ClipboardData(text: numbers));
@@ -753,14 +753,33 @@ class _StudentCardState extends State<_StudentCard> {
     final roll = widget.student['roll_number'] ?? '';
     final present = widget.student['present'] ?? 0;
     final total = widget.student['total'] ?? 0;
-    final phoneRaw = (widget.student['phone'] ?? widget.student['parent_phone'] ?? widget.student['mobile'] ?? '').toString().trim();
+    final phoneRaw = (widget.student['parent_phone'] ?? widget.student['phone'] ?? widget.student['mobile'] ?? '').toString().trim();
 
     String cleanDigits = phoneRaw.replaceAll(RegExp(r'[^0-9]'), '');
-    if (cleanDigits.startsWith('0') && cleanDigits.length == 11) {
+    while (cleanDigits.startsWith('0')) {
       cleanDigits = cleanDigits.substring(1);
     }
     String smsPhone = cleanDigits.length == 10 ? '+91$cleanDigits' : (phoneRaw.startsWith('+') ? phoneRaw : cleanDigits);
     String waPhone = cleanDigits.length == 10 ? '91$cleanDigits' : cleanDigits;
+
+    if (cleanDigits.isEmpty || cleanDigits.length < 10) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Cannot launch WhatsApp/SMS: Student has an invalid phone number ($phoneRaw). Please enroll a valid 10-digit mobile number.", style: GoogleFonts.outfit(color: Colors.white)),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      // Fallback to system share popup so teacher can share manually via any app
+      Share.share(
+        NudgeSettingsService.buildMessage(
+          studentName: name, rollNumber: roll, percentage: pct, present: present, total: total, subject: widget.className ?? 'your class',
+        ),
+        subject: 'AttendLens Shortage Warning: $name',
+      );
+      return;
+    }
 
     final message = NudgeSettingsService.buildMessage(
       studentName: name,
