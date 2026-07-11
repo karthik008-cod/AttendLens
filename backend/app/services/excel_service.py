@@ -58,6 +58,8 @@ def generate_class_excel(db, classroom_id: int) -> str:
         cell.alignment = center_align
         cell.border = thin_border
 
+    total_lectures = len(lecture_dates)
+
     # Data rows
     for idx, student in enumerate(students):
         row_idx = 4 + idx
@@ -105,6 +107,6 @@ def generate_class_excel(db, classroom_id: int) -> str:
         col_letter = get_column_letter(col[0].column)
         ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
-    file_path = os.path.join(REPORTS_DIR, f"Attendance_{classroom.name.replace(' ', '_')}_{classroom.id}.xlsx")
+    file_path = os.path.join(REPORTS_DIR, f"Attendance_{classroom['name'].replace(' ', '_')}_{classroom['id']}.xlsx")
     wb.save(file_path)
     return file_path
