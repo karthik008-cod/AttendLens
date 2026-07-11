@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AttendLensTheme {
-  // Brand Colors
-  static const Color backgroundDark = Color(0xFF0B0F19);
-  static const Color surfaceDark = Color(0xFF151B2B);
-  static const Color cardDark = Color(0xFF1E2638);
+  // Brand Colors (Emerald / Green Theme)
+  static const Color backgroundDark = Color(0xFF0A100D);
+  static const Color surfaceDark = Color(0xFF121D18);
+  static const Color cardDark = Color(0xFF192821);
   
-  static const Color primaryIndigo = Color(0xFF6366F1);
-  static const Color primaryPurple = Color(0xFF8B5CF6);
-  static const Color accentCyan = Color(0xFF06B6D4);
+  static const Color primaryIndigo = Color(0xFF10B981); // Emerald Green (kept variable name for 100% backward compatibility)
+  static const Color primaryPurple = Color(0xFF059669); // Deep Emerald / Teal
+  static const Color accentCyan = Color(0xFF34D399);    // Mint Green Accent
   
   static const Color statusPresent = Color(0xFF10B981); // Emerald
   static const Color statusAbsent = Color(0xFFF43F5E);  // Rose / Coral

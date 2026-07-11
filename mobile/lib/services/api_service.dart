@@ -45,10 +45,15 @@ class ApiService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_base_url');
-      if (saved != null && saved.isNotEmpty) {
+      if (saved != null && saved.isNotEmpty && !saved.contains('10.0.2.2') && !saved.contains('localhost')) {
         baseUrl = _normalizeUrl(saved);
+      } else {
+        baseUrl = 'https://attendlens.onrender.com/api';
+        await saveBaseUrl(baseUrl);
       }
-    } catch (_) {}
+    } catch (_) {
+      baseUrl = 'https://attendlens.onrender.com/api';
+    }
   }
 
   static Future<void> saveBaseUrl(String url) async {

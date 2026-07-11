@@ -354,7 +354,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [Color(0xFF1a1060), Color(0xFF0B0F19)],
+                      colors: [Color(0xFF064E3B), Color(0xFF0A100D)],
                       begin: Alignment.topLeft, end: Alignment.bottomRight,
                     ),
                   ),
@@ -366,14 +366,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: Image.asset('assets/logo.jpg', width: 44, height: 44, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.lens, color: AttendLensTheme.accentCyan, size: 36)),
+                            child: Image.asset('assets/logo.jpg', width: 48, height: 48, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.lens, color: AttendLensTheme.accentCyan, size: 36)),
                           ),
                           const SizedBox(width: 14),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text('AttendLens', style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5)),
-                              Text('SEE . RECORD . RELY.', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w700, color: AttendLensTheme.accentCyan, letterSpacing: 2.5)),
+                              Text('TEACH MORE. TRACK LESS.', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w700, color: AttendLensTheme.accentCyan, letterSpacing: 2.0)),
                             ],
                           ),
                         ],
