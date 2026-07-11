@@ -659,15 +659,21 @@ class _StudentCardState extends State<_StudentCard> {
 
     if (cleanDigits.isNotEmpty) {
       final smsUri = Uri.parse('sms:$smsPhone?body=${Uri.encodeComponent(message)}');
-      if (await canLaunchUrl(smsUri)) {
-        await launchUrl(smsUri);
-        return;
-      }
+      try {
+        if (await canLaunchUrl(smsUri) || true) {
+          if (await launchUrl(smsUri)) {
+            return;
+          }
+        }
+      } catch (_) {}
+
       final waUri = Uri.parse('https://wa.me/$waPhone?text=${Uri.encodeComponent(message)}');
-      if (await canLaunchUrl(waUri)) {
-        await launchUrl(waUri, mode: LaunchMode.externalApplication);
-        return;
-      }
+      try {
+        if (await canLaunchUrl(waUri)) {
+          await launchUrl(waUri, mode: LaunchMode.externalApplication);
+          return;
+        }
+      } catch (_) {}
     }
 
     Share.share(message, subject: 'AttendLens Shortage Warning: $name');
