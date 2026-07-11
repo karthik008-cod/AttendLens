@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:mobile/services/api_service.dart';
+import 'package:mobile/services/nudge_settings_service.dart';
 import 'package:mobile/theme/theme.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -458,7 +460,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
           children: [
             Text('Filter Students', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
             const SizedBox(height: 16),
-            ...['All', 'Below 75% (Shortage)', 'Above 75% (Safe)', '100% Perfect'].map((opt) {
+            ...['All', 'Below ${NudgeSettingsService.threshold.toStringAsFixed(0)}% (Shortage)', 'Above ${NudgeSettingsService.threshold.toStringAsFixed(0)}% (Safe)', '100% Perfect'].map((opt) {
               final sel = _filterBy == opt;
               return ListTile(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -487,8 +489,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
         if (!matchName && !matchRoll) return false;
       }
       final pct = (s['percentage'] as num).toDouble();
-      if (_filterBy == 'Below 75% (Shortage)' && pct >= 75) return false;
-      if (_filterBy == 'Above 75% (Safe)' && pct < 75) return false;
+      if (_filterBy.startsWith('Below') && pct >= NudgeSettingsService.threshold) return false;
+      if (_filterBy.startsWith('Above') && pct < NudgeSettingsService.threshold) return false;
       if (_filterBy == '100% Perfect' && pct < 100) return false;
       return true;
     }).toList();
@@ -572,24 +574,37 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
           ),
         ),
 
-        // At-risk banner
-        if (allStudents.any((s) => (s['percentage'] as num) < 75) && _searchQuery.isEmpty && _filterBy == 'All')
+        // At-risk banner with Bulk Broadcast Trigger
+        if (allStudents.any((s) => (s['percentage'] as num) < NudgeSettingsService.threshold) && _searchQuery.isEmpty && _filterBy == 'All')
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: AttendLensTheme.statusAbsent.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AttendLensTheme.statusAbsent.withOpacity(0.3)),
+                color: AttendLensTheme.statusAbsent.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AttendLensTheme.statusAbsent.withOpacity(0.4)),
               ),
               child: Row(children: [
-                const Icon(Icons.warning_amber_rounded, color: AttendLensTheme.statusAbsent, size: 18),
-                const SizedBox(width: 10),
+                const Icon(Icons.warning_amber_rounded, color: AttendLensTheme.statusAbsent, size: 20),
+                const SizedBox(width: 8),
                 Expanded(child: Text(
-                  '${allStudents.where((s) => (s['percentage'] as num) < 75).length} student(s) below 75% — listed first',
-                  style: GoogleFonts.outfit(fontSize: 12, color: AttendLensTheme.statusAbsent),
+                  '${allStudents.where((s) => (s['percentage'] as num) < NudgeSettingsService.threshold).length} student(s) below ${NudgeSettingsService.threshold.toStringAsFixed(0)}%',
+                  style: GoogleFonts.outfit(fontSize: 13, color: AttendLensTheme.statusAbsent, fontWeight: FontWeight.w600),
                 )),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AttendLensTheme.statusAbsent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.campaign_rounded, size: 16),
+                  label: Text("Broadcast All", style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.bold)),
+                  onPressed: () => _showBulkBroadcastModal(allStudents.where((s) => (s['percentage'] as num) < NudgeSettingsService.threshold).toList()),
+                ),
               ]),
             ),
           ),
@@ -601,10 +616,102 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
                   itemCount: filtered.length,
-                  itemBuilder: (_, i) => _StudentCard(student: filtered[i], pctColor: _pctColor),
+                  itemBuilder: (_, i) => _StudentCard(student: filtered[i], pctColor: _pctColor, className: widget.className),
                 ),
         ),
       ],
+    );
+  }
+
+  void _showBulkBroadcastModal(List<Map<String, dynamic>> defaulters) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AttendLensTheme.surfaceDark,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 24, right: 24, top: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Bulk Broadcast Alerts 📢', style: GoogleFonts.outfit(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                IconButton(icon: const Icon(Icons.close, color: Colors.white70), onPressed: () => Navigator.pop(ctx)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${defaulters.length} students are currently below your ${NudgeSettingsService.threshold.toStringAsFixed(0)}% attendance threshold for ${widget.className}. Choose a broadcast action:',
+              style: GoogleFonts.outfit(color: AttendLensTheme.textSecondary, fontSize: 13),
+            ),
+            const SizedBox(height: 20),
+
+            // Option 1: Sequential / Batch SMS
+            ListTile(
+              onTap: () async {
+                Navigator.pop(ctx);
+                for (final s in defaulters) {
+                  final name = s['name'] ?? 'Student';
+                  final roll = s['roll_number'] ?? '';
+                  final present = s['present'] ?? 0;
+                  final total = s['total'] ?? 0;
+                  final pct = (s['percentage'] as num).toDouble();
+                  final phoneRaw = (s['phone'] ?? s['parent_phone'] ?? s['mobile'] ?? '').toString().trim();
+                  String cleanDigits = phoneRaw.replaceAll(RegExp(r'[^0-9]'), '');
+                  if (cleanDigits.startsWith('0') && cleanDigits.length == 11) cleanDigits = cleanDigits.substring(1);
+                  String smsPhone = cleanDigits.length == 10 ? '+91$cleanDigits' : cleanDigits;
+
+                  final message = NudgeSettingsService.buildMessage(
+                    studentName: name, rollNumber: roll, percentage: pct, present: present, total: total, subject: widget.className,
+                  );
+
+                  if (cleanDigits.isNotEmpty) {
+                    final smsUri = Uri.parse('sms:$smsPhone?body=${Uri.encodeComponent(message)}');
+                    try {
+                      await launchUrl(smsUri);
+                    } catch (_) {}
+                    // Brief delay so teacher can confirm or send
+                    await Future.delayed(const Duration(milliseconds: 1500));
+                  }
+                }
+              },
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              tileColor: AttendLensTheme.primaryIndigo.withOpacity(0.15),
+              leading: const CircleAvatar(backgroundColor: AttendLensTheme.primaryIndigo, child: Icon(Icons.sms_rounded, color: Colors.white, size: 20)),
+              title: Text('Send Batch SMS Queue', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: Text('Opens default messaging app sequentially for each defaulter', style: GoogleFonts.outfit(color: Colors.white60, fontSize: 12)),
+            ),
+            const SizedBox(height: 12),
+
+            // Option 2: Export Numbers to Clipboard
+            ListTile(
+              onTap: () {
+                final numbers = defaulters.map((s) {
+                  final p = (s['phone'] ?? s['parent_phone'] ?? '').toString().trim();
+                  return '${s['name']} (${s['roll_number']}): $p';
+                }).join('\n');
+                Clipboard.setData(ClipboardData(text: numbers));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Copied ${defaulters.length} defaulter contacts to clipboard!', style: GoogleFonts.outfit(color: Colors.white)),
+                    backgroundColor: AttendLensTheme.statusPresent,
+                  ),
+                );
+              },
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              tileColor: AttendLensTheme.accentCyan.withOpacity(0.15),
+              leading: const CircleAvatar(backgroundColor: AttendLensTheme.accentCyan, child: Icon(Icons.copy_rounded, color: Colors.black, size: 20)),
+              title: Text('Copy All Defaulter Contacts', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: Text('Export names & mobile numbers to clipboard for WhatsApp group / Excel', style: GoogleFonts.outfit(color: Colors.white60, fontSize: 12)),
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
     );
   }
 
@@ -631,7 +738,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> with SingleTickerProv
 class _StudentCard extends StatefulWidget {
   final Map<String, dynamic> student;
   final Color Function(double) pctColor;
-  const _StudentCard({required this.student, required this.pctColor});
+  final String? className;
+  const _StudentCard({required this.student, required this.pctColor, this.className});
 
   @override
   State<_StudentCard> createState() => _StudentCardState();
@@ -651,31 +759,31 @@ class _StudentCardState extends State<_StudentCard> {
     if (cleanDigits.startsWith('0') && cleanDigits.length == 11) {
       cleanDigits = cleanDigits.substring(1);
     }
-    // Prepend India country code 91 if exactly 10 digits (e.g., 9876543210 -> +919876543210 / 919876543210)
     String smsPhone = cleanDigits.length == 10 ? '+91$cleanDigits' : (phoneRaw.startsWith('+') ? phoneRaw : cleanDigits);
     String waPhone = cleanDigits.length == 10 ? '91$cleanDigits' : cleanDigits;
 
-    final message = '🚨 AttendLens Academic Warning:\n\nHello $name (Roll No: $roll),\n\nYour attendance is currently at ${pct.toStringAsFixed(1)}% ($present Present / $total Total sessions), which falls below the mandatory 75% threshold.\n\nPlease attend upcoming classes regularly or contact the faculty advisor immediately to avoid attendance shortage penalties.';
+    final message = NudgeSettingsService.buildMessage(
+      studentName: name,
+      rollNumber: roll,
+      percentage: pct,
+      present: present,
+      total: total,
+      subject: widget.className ?? 'your class',
+    );
 
-    if (cleanDigits.isNotEmpty) {
-      final smsUri = Uri.parse('sms:$smsPhone?body=${Uri.encodeComponent(message)}');
-      try {
-        if (await canLaunchUrl(smsUri) || true) {
-          if (await launchUrl(smsUri)) {
-            return;
-          }
-        }
-      } catch (_) {}
-
+    if (NudgeSettingsService.defaultChannel == 'whatsapp' && cleanDigits.isNotEmpty) {
       final waUri = Uri.parse('https://wa.me/$waPhone?text=${Uri.encodeComponent(message)}');
       try {
-        if (await canLaunchUrl(waUri)) {
-          await launchUrl(waUri, mode: LaunchMode.externalApplication);
-          return;
-        }
+        if (await launchUrl(waUri, mode: LaunchMode.externalApplication)) return;
+      } catch (_) {}
+    } else if (NudgeSettingsService.defaultChannel == 'sms' && cleanDigits.isNotEmpty) {
+      final smsUri = Uri.parse('sms:$smsPhone?body=${Uri.encodeComponent(message)}');
+      try {
+        if (await launchUrl(smsUri)) return;
       } catch (_) {}
     }
 
+    // Default or fallback: System share popup
     Share.share(message, subject: 'AttendLens Shortage Warning: $name');
   }
 
@@ -897,8 +1005,8 @@ class _StudentCardState extends State<_StudentCard> {
               ),
             ),
 
-            // Smart At-Risk Alert Nudge (if below 75%)
-            if (pct < 75) ...[
+            // Smart At-Risk Alert Nudge (if below custom threshold)
+            if (pct < NudgeSettingsService.threshold) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -907,7 +1015,7 @@ class _StudentCardState extends State<_StudentCard> {
                   children: [
                     const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 18),
                     const SizedBox(width: 8),
-                    Expanded(child: Text("Shortage Alert Trigger (<75%)", style: GoogleFonts.outfit(color: Colors.orangeAccent, fontSize: 12, fontWeight: FontWeight.w600))),
+                    Expanded(child: Text("Shortage Alert Trigger (<${NudgeSettingsService.threshold.toStringAsFixed(0)}%)", style: GoogleFonts.outfit(color: Colors.orangeAccent, fontSize: 12, fontWeight: FontWeight.w600))),
                     TextButton.icon(
                       style: TextButton.styleFrom(foregroundColor: Colors.white, backgroundColor: Colors.orange.shade800, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                       icon: const Icon(Icons.send_rounded, size: 14),

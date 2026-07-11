@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile/models/teacher_model.dart';
 import 'package:mobile/services/api_service.dart';
+import 'package:mobile/services/nudge_settings_service.dart';
 import 'package:mobile/theme/theme.dart';
 import 'package:mobile/screens/auth/login_screen.dart';
 import 'package:mobile/screens/home_dashboard_screen.dart';
@@ -10,6 +11,7 @@ import 'package:mobile/screens/home_dashboard_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ApiService.loadSavedBaseUrl();
+  await NudgeSettingsService.init();
   runApp(const AttendLensApp());
 }
 

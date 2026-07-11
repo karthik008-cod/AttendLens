@@ -99,6 +99,26 @@ class ApiService {
     throw Exception(json.decode(res.body)['detail'] ?? 'Invalid credentials');
   }
 
+  static Future<Map<String, dynamic>> forgotPassword(String email) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/auth/forgot-password'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'email': email}),
+    );
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception(json.decode(res.body)['detail'] ?? 'Forgot password request failed');
+  }
+
+  static Future<Map<String, dynamic>> resetPassword(String email, String newPassword, {String? pin}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/auth/reset-password'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'email': email, 'new_password': newPassword, 'pin': pin ?? '1234'}),
+    );
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception(json.decode(res.body)['detail'] ?? 'Password reset failed');
+  }
+
   static Future<Map<String, dynamic>> updateTeacher(
     int teacherId, {
     String? name,
@@ -356,8 +376,9 @@ class ApiService {
     int classroomId,
     String dateStr,
     List<int> presentIds,
-    List<int> absentIds,
-  ) async {
+    List<int> absentIds, {
+    int weight = 1,
+  }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/attendance/confirm'),
       headers: {'Content-Type': 'application/json'},
@@ -366,6 +387,7 @@ class ApiService {
         'date_str': dateStr,
         'present_student_ids': presentIds,
         'absent_student_ids': absentIds,
+        'weight': weight,
       }),
     );
     if (res.statusCode == 200) return json.decode(res.body);

@@ -30,6 +30,7 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
   late List<Map<String, dynamic>> _present;
   late List<Map<String, dynamic>> _absent;
   bool _isSaving = false;
+  int _sessionWeight = 1;
 
   @override
   void initState() {
@@ -60,7 +61,7 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
     final absentIds = _absent.map((s) => s["id"] as int).toList();
 
     try {
-      await ApiService.confirmAttendance(widget.classId, dateWithTimeStr, presentIds, absentIds);
+      await ApiService.confirmAttendance(widget.classId, dateWithTimeStr, presentIds, absentIds, weight: _sessionWeight);
       if (mounted) {
         _showSuccessDialog();
       }
@@ -213,6 +214,48 @@ class _AttendanceReviewScreenState extends State<AttendanceReviewScreen> {
                     ],
                   ),
                 ],
+              ),
+            ),
+
+            // Session Type Selector (1x vs 2x Weight)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AttendLensTheme.backgroundDark,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.class_outlined, color: AttendLensTheme.accentCyan, size: 18),
+                    const SizedBox(width: 8),
+                    Text("Weight:", style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: Text("1x Lecture", style: GoogleFonts.outfit(fontSize: 11, fontWeight: _sessionWeight == 1 ? FontWeight.bold : FontWeight.normal)),
+                      selected: _sessionWeight == 1,
+                      selectedColor: AttendLensTheme.primaryIndigo,
+                      backgroundColor: AttendLensTheme.surfaceDark,
+                      labelStyle: TextStyle(color: _sessionWeight == 1 ? Colors.white : Colors.white60),
+                      onSelected: (sel) {
+                        if (sel) setState(() => _sessionWeight = 1);
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: Text("2x Lab/Workshop", style: GoogleFonts.outfit(fontSize: 11, fontWeight: _sessionWeight == 2 ? FontWeight.bold : FontWeight.normal)),
+                      selected: _sessionWeight == 2,
+                      selectedColor: AttendLensTheme.accentCyan,
+                      backgroundColor: AttendLensTheme.surfaceDark,
+                      labelStyle: TextStyle(color: _sessionWeight == 2 ? Colors.black : Colors.white60),
+                      onSelected: (sel) {
+                        if (sel) setState(() => _sessionWeight = 2);
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
 

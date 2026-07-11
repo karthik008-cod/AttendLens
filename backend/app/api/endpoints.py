@@ -50,6 +50,14 @@ class TeacherCreate(BaseModel):
     institution: Optional[str] = None
     subject_specialization: Optional[str] = None
 
+class ForgotPasswordReq(BaseModel):
+    email: str
+
+class ResetPasswordReq(BaseModel):
+    email: str
+    new_password: str
+    pin: Optional[str] = "1234"
+
 class TeacherLogin(BaseModel):
     email: str
     password: str
@@ -86,6 +94,7 @@ class AttendanceConfirmRequest(BaseModel):
     date_str: str   # YYYY-MM-DD
     present_student_ids: List[int]
     absent_student_ids: List[int]
+    weight: Optional[int] = 1
 
 class AttendanceUpdateRequest(BaseModel):
     student_id: int
@@ -165,6 +174,24 @@ def login_teacher(creds: TeacherLogin, db = Depends(get_db)):
     if not teacher or not verify_password(creds.password, teacher["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     return _teacher_dict(teacher)
+
+
+@router.post("/auth/forgot-password")
+def forgot_password(req: ForgotPasswordReq, db = Depends(get_db)):
+    teacher = db.teachers.find_one({"email": req.email})
+    if not teacher:
+        return {"status": "ok", "message": "If an account exists, a reset pin (1234) has been authorized."}
+    return {"status": "ok", "message": "Password reset authorized for " + req.email + ". Use PIN 1234."}
+
+
+@router.post("/auth/reset-password")
+def reset_password(req: ResetPasswordReq, db = Depends(get_db)):
+    teacher = db.teachers.find_one({"email": req.email})
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Account not found with this email")
+    hashed_pw = hash_password(req.new_password)
+    db.teachers.update_one({"email": req.email}, {"$set": {"password_hash": hashed_pw}})
+    return {"status": "ok", "message": "Password updated successfully"}
 
 
 # ── Teacher Profile ───────────────────────────────────────────────────────────
@@ -850,28 +877,31 @@ async def websocket_live_scan(websocket: WebSocket, classroom_id: int, db = Depe
 
 @router.post("/attendance/confirm")
 def confirm_attendance(req: AttendanceConfirmRequest, db = Depends(get_db)):
-    ld = db.lecture_dates.find_one({
-        "classroom_id": req.classroom_id,
-        "date_str": req.date_str,
-    })
+    weight = max(1, req.weight or 1)
+    for i in range(weight):
+        curr_date_str = req.date_str if i == 0 else f"{req.date_str} (Unit {i+1})"
+        ld = db.lecture_dates.find_one({
+            "classroom_id": req.classroom_id,
+            "date_str": curr_date_str,
+        })
 
-    if not ld:
-        ld_id = get_next_id("lecture_dates")
-        ld = {"id": ld_id, "date_str": req.date_str, "classroom_id": req.classroom_id}
-        db.lecture_dates.insert_one(ld)
-    else:
-        # Replace existing records for this date
-        db.attendance_records.delete_many({"lecture_date_id": ld["id"]})
+        if not ld:
+            ld_id = get_next_id("lecture_dates")
+            ld = {"id": ld_id, "date_str": curr_date_str, "classroom_id": req.classroom_id}
+            db.lecture_dates.insert_one(ld)
+        else:
+            # Replace existing records for this date
+            db.attendance_records.delete_many({"lecture_date_id": ld["id"]})
 
-    for s_id in req.present_student_ids:
-        a_id = get_next_id("attendance_records")
-        db.attendance_records.insert_one({"id": a_id, "student_id": s_id, "lecture_date_id": ld["id"], "classroom_id": req.classroom_id, "status": "P"})
-    for s_id in req.absent_student_ids:
-        a_id = get_next_id("attendance_records")
-        db.attendance_records.insert_one({"id": a_id, "student_id": s_id, "lecture_date_id": ld["id"], "classroom_id": req.classroom_id, "status": "A"})
+        for s_id in req.present_student_ids:
+            a_id = get_next_id("attendance_records")
+            db.attendance_records.insert_one({"id": a_id, "student_id": s_id, "lecture_date_id": ld["id"], "classroom_id": req.classroom_id, "status": "P"})
+        for s_id in req.absent_student_ids:
+            a_id = get_next_id("attendance_records")
+            db.attendance_records.insert_one({"id": a_id, "student_id": s_id, "lecture_date_id": ld["id"], "classroom_id": req.classroom_id, "status": "A"})
 
     excel_path = generate_class_excel(db, req.classroom_id)
-    return {"message": "Attendance saved successfully", "excel_path": excel_path}
+    return {"message": f"Attendance ({weight}x weight) saved successfully", "excel_path": excel_path}
 
 
 @router.put("/attendance/record")

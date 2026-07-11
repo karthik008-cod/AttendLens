@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:mobile/services/api_service.dart';
+import 'package:mobile/services/nudge_settings_service.dart';
 import 'package:mobile/theme/theme.dart';
 
 void showServerSettingsDialog(BuildContext context, {VoidCallback? onSaved}) {
   final urlCtrl = TextEditingController(text: ApiService.baseUrl);
+  final templateCtrl = TextEditingController(text: NudgeSettingsService.messageTemplate);
+  String selectedChannel = NudgeSettingsService.defaultChannel;
+  double currentThreshold = NudgeSettingsService.threshold;
   bool isTesting = false;
   String? statusMsg;
   bool isSuccess = false;
@@ -24,7 +28,7 @@ void showServerSettingsDialog(BuildContext context, {VoidCallback? onSaved}) {
               child: const Icon(Icons.settings_input_antenna, color: AttendLensTheme.accentCyan, size: 22),
             ),
             const SizedBox(width: 12),
-            Text('Server Settings ⚙️', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+            Text('Server & Nudge Settings ⚙️', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
           ],
         ),
         content: SingleChildScrollView(
@@ -33,10 +37,10 @@ void showServerSettingsDialog(BuildContext context, {VoidCallback? onSaved}) {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Enter your backend API address so you can use AttendLens wirelessly without a USB cable!',
-                style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13, height: 1.4),
+                '1. Server API Connection',
+                style: GoogleFonts.outfit(color: AttendLensTheme.accentCyan, fontWeight: FontWeight.bold, fontSize: 14),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 10),
               TextField(
                 controller: urlCtrl,
                 style: GoogleFonts.outfit(color: Colors.white, fontSize: 14),
@@ -52,33 +56,75 @@ void showServerSettingsDialog(BuildContext context, {VoidCallback? onSaved}) {
                   focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AttendLensTheme.accentCyan)),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
+              const Divider(color: Colors.white12),
+              const SizedBox(height: 14),
+
+              Text(
+                '2. Nudge & Shortage Preferences 📲',
+                style: GoogleFonts.outfit(color: AttendLensTheme.accentCyan, fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const SizedBox(height: 12),
+              Text('Default Nudge Platform', style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13)),
+              const SizedBox(height: 8),
               Container(
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.04),
-                  borderRadius: BorderRadius.circular(14),
+                  color: AttendLensTheme.backgroundDark,
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.white12),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.wifi, color: AttendLensTheme.accentCyan, size: 16),
-                        const SizedBox(width: 6),
-                        Text('💡 How to connect wirelessly:', style: GoogleFonts.outfit(color: AttendLensTheme.accentCyan, fontWeight: FontWeight.bold, fontSize: 13)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '1. Connect phone & laptop to same Wi-Fi.\n'
-                      '2. Open PowerShell on laptop, run: ipconfig\n'
-                      '3. Find your IPv4 (e.g., 192.168.1.15)\n'
-                      '4. Enter: http://192.168.1.15:8000/api',
-                      style: GoogleFonts.outfit(color: Colors.white70, fontSize: 12, height: 1.5),
-                    ),
-                  ],
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: selectedChannel,
+                    dropdownColor: AttendLensTheme.surfaceDark,
+                    icon: const Icon(Icons.arrow_drop_down, color: AttendLensTheme.accentCyan),
+                    isExpanded: true,
+                    style: GoogleFonts.outfit(color: Colors.white, fontSize: 14),
+                    items: const [
+                      DropdownMenuItem(value: 'sms', child: Text('Default SMS / Messages App')),
+                      DropdownMenuItem(value: 'whatsapp', child: Text('WhatsApp Direct')),
+                      DropdownMenuItem(value: 'chooser', child: Text('System Share Chooser')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) setState(() => selectedChannel = val);
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Attendance Shortage Target:', style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13)),
+                  Text('${currentThreshold.toStringAsFixed(0)}%', style: GoogleFonts.outfit(color: AttendLensTheme.statusAbsent, fontWeight: FontWeight.bold, fontSize: 15)),
+                ],
+              ),
+              Slider(
+                value: currentThreshold,
+                min: 50.0,
+                max: 90.0,
+                divisions: 8,
+                activeColor: AttendLensTheme.statusAbsent,
+                inactiveColor: Colors.white12,
+                label: '${currentThreshold.toStringAsFixed(0)}%',
+                onChanged: (val) => setState(() => currentThreshold = val),
+              ),
+              const SizedBox(height: 10),
+
+              Text('Custom Warning Template ({student_name}, {percentage}, {threshold}, {subject}):', style: GoogleFonts.outfit(color: Colors.white70, fontSize: 12)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: templateCtrl,
+                maxLines: 4,
+                style: GoogleFonts.outfit(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: AttendLensTheme.backgroundDark,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AttendLensTheme.accentCyan)),
+                  contentPadding: const EdgeInsets.all(12),
                 ),
               ),
               if (statusMsg != null) ...[
@@ -120,6 +166,13 @@ void showServerSettingsDialog(BuildContext context, {VoidCallback? onSaved}) {
               final newUrl = urlCtrl.text.trim();
               if (newUrl.isEmpty) return;
               setState(() { isTesting = true; statusMsg = null; });
+
+              await NudgeSettingsService.saveSettings(
+                channel: selectedChannel,
+                newThreshold: currentThreshold,
+                template: templateCtrl.text,
+              );
+
               try {
                 final testUri = Uri.parse(newUrl.replaceAll('/api', '') + '/docs');
                 final res = await http.get(testUri).timeout(const Duration(seconds: 3));
@@ -143,7 +196,7 @@ void showServerSettingsDialog(BuildContext context, {VoidCallback? onSaved}) {
                 setState(() {
                   isTesting = false;
                   isSuccess = false;
-                  statusMsg = 'Saved! But test failed: ${e.toString().replaceAll('Exception: ', '')}. Make sure your laptop and phone are on the same Wi-Fi.';
+                  statusMsg = 'Saved URL & Nudge preferences! But server ping failed: ${e.toString().replaceAll('Exception: ', '')}. Check Wi-Fi.';
                 });
               }
             },
