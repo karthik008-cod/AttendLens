@@ -29,7 +29,7 @@ def log_print(msg: str):
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 ENCODING_DIM = 128       # SphereFace/SFace deep feature dimension
-MATCH_THRESHOLD = 0.60   # Cosine distance (<0.60 means neural similarity >0.40 = guaranteed same person)
+MATCH_THRESHOLD = 0.68   # Cosine distance (<0.68 means neural similarity >0.32 = rapid recognition even across classroom)
 
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../models")
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -70,7 +70,7 @@ def _get_detector(shape=(320, 320)):
                     model=YUNET_PATH,
                     config="",
                     input_size=shape,
-                    score_threshold=0.65,
+                    score_threshold=0.35,
                     nms_threshold=0.3,
                     top_k=5000
                 )
@@ -78,7 +78,7 @@ def _get_detector(shape=(320, 320)):
                 _detector.setInputSize(shape)
             return _detector
         except Exception as e:
-            print(f"[AI Engine] YuNet initialization failed: {e}")
+            log_print(f"[AI Engine] YuNet initialization failed: {e}")
     return None
 
 def _get_recognizer():
@@ -93,16 +93,23 @@ def _get_recognizer():
                 )
             return _recognizer
         except Exception as e:
-            print(f"[AI Engine] SFace initialization failed: {e}")
+            log_print(f"[AI Engine] SFace initialization failed: {e}")
     return None
 
 def _get_face_cascade():
     global _face_cascade
     if _face_cascade is None:
-        _face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        )
-    return _face_cascade
+        try:
+            if hasattr(cv2, "CascadeClassifier") and hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
+                _face_cascade = cv2.CascadeClassifier(
+                    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                )
+            else:
+                _face_cascade = "UNAVAILABLE"
+        except Exception as e:
+            log_print(f"[AI Engine] Haar cascade init warning: {e}")
+            _face_cascade = "UNAVAILABLE"
+    return _face_cascade if _face_cascade != "UNAVAILABLE" else None
 
 # ── Feature Extraction ────────────────────────────────────────────────────────
 
@@ -156,28 +163,32 @@ def _extract_encoding_from_bgr(img_bgr):
         except Exception as e:
             print(f"[AI Engine] YuNet/SFace extraction error: {e}")
 
-    # Fallback to Haar cascade
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    # Fallback to Haar cascade if YuNet found nothing
     cascade = _get_face_cascade()
-    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-    if len(faces) > 0:
-        x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
-        pad = int(max(fw, fh) * 0.15)
-        y1, y2 = max(0, y - pad), min(h, y + fh + pad)
-        x1, x2 = max(0, x - pad), min(w, x + fw + pad)
-        roi = img_bgr[y1:y2, x1:x2]
-        if recognizer is not None and roi.shape[0] > 10 and roi.shape[1] > 10:
-            try:
-                roi_resized = cv2.resize(roi, (112, 112))
-                feature = recognizer.feature(roi_resized)
-                emb = feature.flatten()
-                norm = np.linalg.norm(emb)
-                if norm > 0:
-                    emb /= norm
-                return emb
-            except Exception:
-                pass
-        return _extract_face_features_fallback(roi)
+    if cascade is not None:
+        try:
+            gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+            faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            if len(faces) > 0:
+                x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+                pad = int(max(fw, fh) * 0.15)
+                y1, y2 = max(0, y - pad), min(h, y + fh + pad)
+                x1, x2 = max(0, x - pad), min(w, x + fw + pad)
+                roi = img_bgr[y1:y2, x1:x2]
+                if recognizer is not None and roi.shape[0] > 10 and roi.shape[1] > 10:
+                    try:
+                        roi_resized = cv2.resize(roi, (112, 112))
+                        feature = recognizer.feature(roi_resized)
+                        emb = feature.flatten()
+                        norm = np.linalg.norm(emb)
+                        if norm > 0:
+                            emb /= norm
+                        return emb
+                    except Exception:
+                        pass
+                return _extract_face_features_fallback(roi)
+        except Exception:
+            pass
 
     return None
 
@@ -459,13 +470,18 @@ def process_single_frame(image_path: str = None, student_encodings: dict = None,
         ret_d, faces = detector.detect(img)
         if faces is not None:
             for f in faces:
-                if f[14] >= 0.60:  # YuNet confidence >= 60%
+                if f[14] >= 0.35:  # High-sensitivity 35% YuNet threshold for long distance / motion blur
                     detected_faces.append((int(f[0]), int(f[1]), int(f[2]), int(f[3]), f))
 
     if not detected_faces:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        for (x, y, fw, fh) in _get_face_cascade().detectMultiScale(gray, 1.1, 5, minSize=(30, 30)):
-            detected_faces.append((x, y, fw, fh, None))
+        cascade = _get_face_cascade()
+        if cascade is not None:
+            try:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                for (x, y, fw, fh) in cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30)):
+                    detected_faces.append((x, y, fw, fh, None))
+            except Exception:
+                pass
 
     if not detected_faces:
         log_print("Live Frame: No face detected in camera frame")
