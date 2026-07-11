@@ -28,23 +28,35 @@ class ApiService {
     _liveWsChannel = null;
   }
 
-  static void setBaseUrl(String url) => baseUrl = url;
+  static String _normalizeUrl(String url) {
+    String clean = url.trim();
+    while (clean.endsWith('/')) {
+      clean = clean.substring(0, clean.length - 1);
+    }
+    if (!clean.endsWith('/api')) {
+      clean = '$clean/api';
+    }
+    return clean;
+  }
+
+  static void setBaseUrl(String url) => baseUrl = _normalizeUrl(url);
 
   static Future<void> loadSavedBaseUrl() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_base_url');
       if (saved != null && saved.isNotEmpty) {
-        baseUrl = saved;
+        baseUrl = _normalizeUrl(saved);
       }
     } catch (_) {}
   }
 
   static Future<void> saveBaseUrl(String url) async {
-    baseUrl = url;
+    final normalized = _normalizeUrl(url);
+    baseUrl = normalized;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('saved_base_url', url);
+      await prefs.setString('saved_base_url', normalized);
     } catch (_) {}
   }
 

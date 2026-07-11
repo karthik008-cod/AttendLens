@@ -19,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+app.include_router(api_router)  # Also mount at root so requests without /api prefix never 404
 app.include_router(invite_router)  # Serves /invite/{class_id} at root level
 
 
