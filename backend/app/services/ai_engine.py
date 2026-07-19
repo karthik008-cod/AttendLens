@@ -17,6 +17,9 @@ import urllib.request
 import cv2
 import numpy as np
 
+# Limit OpenCV threads to prevent memory spikes and OOM kills on Render Free Tier
+cv2.setNumThreads(1)
+
 uvicorn_logger = logging.getLogger("uvicorn.error")
 
 def log_print(msg: str):
@@ -205,6 +208,13 @@ def extract_face_encoding(image_path: str) -> str:
     if img is None:
         return json.dumps(np.zeros(ENCODING_DIM).tolist())
 
+    # Resize massive mobile photos to prevent YuNet from allocating huge tensors (OOM fix)
+    max_dim = 640
+    h, w = img.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        img = cv2.resize(img, (int(w * scale), int(h * scale)))
+
     features = _extract_encoding_from_bgr(img)
     if features is None:
         # No face found — attempt encoding entire image crop if close-up selfie
@@ -280,6 +290,12 @@ def assess_photo_quality_and_liveness(image_path: str) -> dict:
         if img is None:
             return {"is_good": False, "sharpness_score": 0.0, "brightness_score": 0.0,
                     "warning_message": "⚠️ Photo file is invalid or corrupted."}
+
+        # Resize to prevent RAM spikes
+        h, w = img.shape[:2]
+        if max(h, w) > 640:
+            scale = 640 / max(h, w)
+            img = cv2.resize(img, (int(w * scale), int(h * scale)))
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
