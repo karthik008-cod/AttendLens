@@ -17,7 +17,7 @@ import urllib.request
 import cv2
 import numpy as np
 
-# Limit OpenCV threads to prevent memory spikes and OOM kills on Render Free Tier
+# Restrict OpenCV threads to prevent OOM on Render free tier (512MB RAM)
 cv2.setNumThreads(1)
 
 uvicorn_logger = logging.getLogger("uvicorn.error")
