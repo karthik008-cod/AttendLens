@@ -124,11 +124,12 @@ def _build_html(class_id: int, class_name: str, required_photos: int) -> str:
           const res = await fetch(API_BASE + '/students', { method: 'POST', body: fd });
           if (!res.ok) {
             let errorMsg = 'Registration failed';
+            const textResponse = await res.text();
             try {
-              const errJson = await res.json();
-              if (errJson.detail) errorMsg = errJson.detail;
+              const errJson = JSON.parse(textResponse);
+              if (errJson.detail) errorMsg = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail);
             } catch (_) {
-              errorMsg = await res.text();
+              errorMsg = textResponse || errorMsg;
             }
             throw new Error(errorMsg);
           }
