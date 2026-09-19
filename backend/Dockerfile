@@ -23,9 +23,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code and pre-create uploads directory
 COPY . .
-RUN mkdir -p /app/uploads && chmod 777 /app/uploads
+RUN mkdir -p /app/uploads /app/reports /app/generated_omr_sheets && chmod -R 777 /app/uploads /app/reports /app/generated_omr_sheets
 
 # Create non-root user for cloud security (required by HuggingFace Spaces)
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

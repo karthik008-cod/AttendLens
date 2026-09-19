@@ -12,6 +12,7 @@ import 'package:mobile/screens/student_onboarding_screen.dart';
 import 'package:mobile/screens/camera_capture_screen.dart';
 import 'package:mobile/screens/analytics_screen.dart';
 import 'package:mobile/screens/auth/login_screen.dart';
+import 'package:mobile/screens/omr/omr_hub_screen.dart';
 import 'package:mobile/widgets/server_settings_dialog.dart';
 
 class HomeDashboardScreen extends StatefulWidget {
@@ -22,6 +23,7 @@ class HomeDashboardScreen extends StatefulWidget {
 }
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
+  int _selectedTab = 0;
   List<dynamic> _classes = [];
   bool _isLoading = true;
 
@@ -342,161 +344,198 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: _loadClasses,
-          color: AttendLensTheme.primaryIndigo,
-          child: CustomScrollView(
-            slivers: [
-              // ── Hero Header ──────────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Color(0xFF064E3B), Color(0xFF0A100D)],
-                      begin: Alignment.topLeft, end: Alignment.bottomRight,
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // App Title / Logo Header
-                      Row(
+      body: IndexedStack(
+        index: _selectedTab,
+        children: [
+          // Tab 0: Classrooms
+          SafeArea(
+            child: RefreshIndicator(
+              onRefresh: _loadClasses,
+              color: AttendLensTheme.primaryIndigo,
+              child: CustomScrollView(
+                slivers: [
+                  // ── Hero Header ──────────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF064E3B), Color(0xFF0A100D)],
+                          begin: Alignment.topLeft, end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.asset('assets/logo.jpg', width: 48, height: 48, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.lens, color: AttendLensTheme.accentCyan, size: 36)),
-                          ),
-                          const SizedBox(width: 14),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          // App Title / Logo Header
+                          Row(
                             children: [
-                              Text('AttendLens', style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5)),
-                              Text('TEACH MORE. TRACK LESS.', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w700, color: AttendLensTheme.accentCyan, letterSpacing: 2.0)),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.asset('assets/logo.jpg', width: 48, height: 48, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.lens, color: AttendLensTheme.accentCyan, size: 36)),
+                              ),
+                              const SizedBox(width: 14),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('AttendLens', style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5)),
+                                  Text('TEACH MORE. TRACK LESS.', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w700, color: AttendLensTheme.accentCyan, letterSpacing: 2.0)),
+                                ],
+                              ),
                             ],
                           ),
+                          const SizedBox(height: 24),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(_greeting, style: GoogleFonts.outfit(fontSize: 14, color: AttendLensTheme.textSecondary)),
+                                Text(_teacher.firstName, style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
+                              ]),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.settings_outlined, color: Colors.white70, size: 26),
+                                    tooltip: 'Server Settings',
+                                    onPressed: _showServerDialog,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    onTap: _showProfileSheet,
+                                    child: CircleAvatar(
+                                      radius: 26,
+                                      backgroundColor: AttendLensTheme.primaryIndigo.withOpacity(0.3),
+                                      child: Text(_teacher.initials, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          if (_teacher.institution != null) ...[
+                            const SizedBox(height: 4),
+                            Text(_teacher.institution!, style: GoogleFonts.outfit(fontSize: 13, color: AttendLensTheme.accentCyan)),
+                          ],
+                          const SizedBox(height: 24),
+
+                          // Stats Row
+                          Row(children: [
+                            _statCard('${_classes.length}', 'Classes', Icons.class_outlined),
+                            const SizedBox(width: 12),
+                            _statCard('$_totalStudents', 'Students', Icons.people_outline),
+                          ]),
                         ],
                       ),
-                      const SizedBox(height: 24),
-                      Row(
+                    ),
+                  ),
+
+                  // ── Section Header ────────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(_greeting, style: GoogleFonts.outfit(fontSize: 14, color: AttendLensTheme.textSecondary)),
-                            Text(_teacher.firstName, style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
-                          ]),
+                          Text('My Classrooms', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                           Row(
                             children: [
                               IconButton(
-                                icon: const Icon(Icons.settings_outlined, color: Colors.white70, size: 26),
-                                tooltip: 'Server Settings',
-                                onPressed: _showServerDialog,
+                                icon: const Icon(Icons.add_circle, color: AttendLensTheme.accentCyan, size: 26),
+                                tooltip: 'Create New Class',
+                                onPressed: _showCreateClassDialog,
                               ),
-                              const SizedBox(width: 8),
-                              GestureDetector(
-                                onTap: _showProfileSheet,
-                                child: CircleAvatar(
-                                  radius: 26,
-                                  backgroundColor: AttendLensTheme.primaryIndigo.withOpacity(0.3),
-                                  child: Text(_teacher.initials, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                                ),
+                              const SizedBox(width: 4),
+                              IconButton(
+                                icon: const Icon(Icons.refresh, color: Colors.grey, size: 22),
+                                tooltip: 'Refresh Classes',
+                                onPressed: _loadClasses,
                               ),
                             ],
                           ),
                         ],
                       ),
-                      if (_teacher.institution != null) ...[
-                        const SizedBox(height: 4),
-                        Text(_teacher.institution!, style: GoogleFonts.outfit(fontSize: 13, color: AttendLensTheme.accentCyan)),
-                      ],
-                      const SizedBox(height: 24),
-
-                      // Stats Row
-                      Row(children: [
-                        _statCard('${_classes.length}', 'Classes', Icons.class_outlined),
-                        const SizedBox(width: 12),
-                        _statCard('$_totalStudents', 'Students', Icons.people_outline),
-                      ]),
-                    ],
+                    ),
                   ),
-                ),
-              ),
 
-              // ── Section Header ────────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('My Classrooms', style: GoogleFonts.outfit(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.add_circle, color: AttendLensTheme.accentCyan, size: 26),
-                            tooltip: 'Create New Class',
-                            onPressed: _showCreateClassDialog,
-                          ),
-                          const SizedBox(width: 4),
-                          IconButton(
-                            icon: const Icon(Icons.refresh, color: Colors.grey, size: 22),
-                            tooltip: 'Refresh Classes',
-                            onPressed: _loadClasses,
-                          ),
-                        ],
+                  // ── Classes List ──────────────────────────────────────────────
+                  if (_isLoading)
+                    const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: AttendLensTheme.primaryIndigo)))
+                  else if (_classes.isEmpty)
+                    SliverFillRemaining(
+                      child: Center(
+                        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          const Text('📚', style: TextStyle(fontSize: 56)),
+                          const SizedBox(height: 16),
+                          Text('No classes yet', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                          const SizedBox(height: 6),
+                          Text('Tap "+" to get started', style: GoogleFonts.outfit(fontSize: 14, color: AttendLensTheme.textSecondary)),
+                        ]),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // ── Classes List ──────────────────────────────────────────────
-              if (_isLoading)
-                const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: AttendLensTheme.primaryIndigo)))
-              else if (_classes.isEmpty)
-                SliverFillRemaining(
-                  child: Center(
-                    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      const Text('📚', style: TextStyle(fontSize: 56)),
-                      const SizedBox(height: 16),
-                      Text('No classes yet', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                      const SizedBox(height: 6),
-                      Text('Tap "+" to get started', style: GoogleFonts.outfit(fontSize: 14, color: AttendLensTheme.textSecondary)),
-                    ]),
-                  ),
-                )
-              else
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) => Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                      child: _ClassCard(
-                        cls: _classes[index],
-                        onAttendance: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => CameraCaptureScreen(classId: _classes[index]['id'], className: _classes[index]['name']),
-                        )).then((_) => _loadClasses()),
-                        onStudents: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => StudentOnboardingScreen(
-                            classId: _classes[index]['id'],
-                            className: _classes[index]['name'],
-                            requiredPhotos: _classes[index]['required_photos'] ?? 3,
+                    )
+                  else
+                    SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) => Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                          child: _ClassCard(
+                            cls: _classes[index],
+                            onAttendance: () => Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => CameraCaptureScreen(classId: _classes[index]['id'], className: _classes[index]['name']),
+                            )).then((_) => _loadClasses()),
+                            onStudents: () => Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => StudentOnboardingScreen(
+                                classId: _classes[index]['id'],
+                                className: _classes[index]['name'],
+                                requiredPhotos: _classes[index]['required_photos'] ?? 3,
+                              ),
+                            )).then((_) => _loadClasses()),
+                            onAnalytics: () => Navigator.push(context, MaterialPageRoute(
+                              builder: (_) => AnalyticsScreen(classId: _classes[index]['id'], className: _classes[index]['name']),
+                            )),
+                            onDownload: () => _downloadSheet(_classes[index]['id'], _classes[index]['name']),
+                            onEdit: () => _showEditClassDialog(_classes[index]),
                           ),
-                        )).then((_) => _loadClasses()),
-                        onAnalytics: () => Navigator.push(context, MaterialPageRoute(
-                          builder: (_) => AnalyticsScreen(classId: _classes[index]['id'], className: _classes[index]['name']),
-                        )),
-                        onDownload: () => _downloadSheet(_classes[index]['id'], _classes[index]['name']),
-                        onEdit: () => _showEditClassDialog(_classes[index]),
+                        ),
+                        childCount: _classes.length,
                       ),
                     ),
-                    childCount: _classes.length,
-                  ),
-                ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 40)),
-            ],
+                  const SliverToBoxAdapter(child: SizedBox(height: 40)),
+                ],
+              ),
+            ),
           ),
+
+          // Tab 1: Scan OMR
+          const OmrHubScreen(),
+        ],
+      ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: AttendLensTheme.surfaceDark,
+          border: Border(top: BorderSide(color: Colors.white.withOpacity(0.08))),
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _selectedTab,
+          onTap: (idx) => setState(() => _selectedTab = idx),
+          backgroundColor: AttendLensTheme.surfaceDark,
+          selectedItemColor: AttendLensTheme.accentCyan,
+          unselectedItemColor: AttendLensTheme.textSecondary,
+          selectedLabelStyle: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 12),
+          unselectedLabelStyle: GoogleFonts.outfit(fontSize: 12),
+          type: BottomNavigationBarType.fixed,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.class_outlined),
+              activeIcon: Icon(Icons.class_),
+              label: 'Classrooms',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.document_scanner_outlined),
+              activeIcon: Icon(Icons.document_scanner),
+              label: 'Scan OMR',
+            ),
+          ],
         ),
       ),
     );

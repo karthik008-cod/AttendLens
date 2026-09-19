@@ -20,7 +20,7 @@ def send_otp_email(recipient_email: str, recipient_name: str, otp_code: str) -> 
 
     # Brevo requires the sender email to be verified under Brevo Dashboard -> Senders & IP -> Senders.
     # Defaulting to the verified email yuvaankaarthikeyaa.1206@gmail.com if not overridden via env
-    sender_email = os.environ.get("BREVO_SENDER_EMAIL", "yuvaankaarthikeyaa.1206@gmail.com").strip()
+    sender_email = os.environ.get("BREVO_SENDER_EMAIL", "attendlens.support@gmail.com").strip()
     sender_name = os.environ.get("BREVO_SENDER_NAME", "AttendLens Classroom AI").strip()
 
     url = "https://api.brevo.com/v3/smtp/email"

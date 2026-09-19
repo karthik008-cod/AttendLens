@@ -440,8 +440,8 @@ async def add_student(
     if photo_path:
         sp_id = get_next_id("student_photos")
         db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": photo_path, "face_encoding": "processing...", "photo_bytes": content})
-        # Process synchronously — encoding completes BEFORE response returns
-        _process_photos_sync(s_id, [photo_path], db)
+        # Process synchronously (in a background thread to prevent blocking event loop)
+        await asyncio.to_thread(_process_photos_sync, s_id, [photo_path], db)
 
     student = db.students.find_one({"id": s_id})
     return _student_dict(student, db)
@@ -501,8 +501,8 @@ async def add_student_batch(
         sp_id = get_next_id("student_photos")
         db.student_photos.insert_one({"id": sp_id, "student_id": s_id, "photo_path": path, "face_encoding": "processing...", "photo_bytes": file_contents[idx]})
 
-    # Process ALL encodings synchronously — completes BEFORE response returns
-    _process_photos_sync(s_id, file_paths, db)
+    # Process ALL encodings synchronously (in a background thread to prevent blocking event loop)
+    await asyncio.to_thread(_process_photos_sync, s_id, file_paths, db)
 
     student = db.students.find_one({"id": s_id})
     return _student_dict(student, db)
@@ -650,10 +650,10 @@ async def add_student_photos_batch(
         db.students.update_one({"id": student_id}, {"$set": {"photo_path": file_paths[0]}})
         s["photo_path"] = file_paths[0]
 
-    # Reprocess all photos for this student synchronously
+    # Reprocess all photos for this student synchronously (in a background thread)
     all_photos = list(db.student_photos.find({"student_id": student_id}))
     all_paths = [p["photo_path"] for p in all_photos if p.get("photo_path")]
-    _process_photos_sync(student_id, all_paths, db)
+    await asyncio.to_thread(_process_photos_sync, student_id, all_paths, db)
 
     updated_s = db.students.find_one({"id": student_id})
     return {
@@ -687,10 +687,10 @@ async def add_student_photo(
     sp_id = get_next_id("student_photos")
     db.student_photos.insert_one({"id": sp_id, "student_id": student_id, "photo_path": file_path, "face_encoding": "processing...", "photo_bytes": content})
 
-    # Reprocess ALL photos for this student to merge the new one
+    # Reprocess ALL photos for this student to merge the new one (in a background thread)
     all_photos = list(db.student_photos.find({"student_id": student_id}))
     all_paths = [p["photo_path"] for p in all_photos if p.get("photo_path")]
-    _process_photos_sync(student_id, all_paths, db)
+    await asyncio.to_thread(_process_photos_sync, student_id, all_paths, db)
 
     s = db.students.find_one({"id": student_id})
     return {

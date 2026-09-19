@@ -3,10 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import db
 from app.api.endpoints import router as api_router
 from app.api.invite_page import invite_router
+from app.api.omr_endpoints import router as omr_router
 
 app = FastAPI(
     title="AttendLens API",
-    description="AI-powered classroom attendance with facial recognition powered by MongoDB Atlas",
+    description="AI-powered classroom attendance and OMR psychometric analytics powered by MongoDB Atlas",
     version="2.0.0",
 )
 
@@ -20,6 +21,8 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api")
 app.include_router(api_router)  # Also mount at root so requests without /api prefix never 404
+app.include_router(omr_router, prefix="/api")
+app.include_router(omr_router)  # Also mount at root
 app.include_router(invite_router)  # Serves /invite/{class_id} at root level
 
 

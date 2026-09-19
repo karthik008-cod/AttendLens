@@ -266,6 +266,31 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                         child: TextField(
                           controller: dobCtrl,
                           style: GoogleFonts.outfit(color: Colors.white),
+                          readOnly: true,
+                          onTap: () async {
+                            final DateTime? pickedDate = await showDatePicker(
+                              context: context,
+                              initialDate: DateTime.now().subtract(const Duration(days: 365 * 10)),
+                              firstDate: DateTime(1900),
+                              lastDate: DateTime.now(),
+                              builder: (context, child) {
+                                return Theme(
+                                  data: Theme.of(context).copyWith(
+                                    colorScheme: const ColorScheme.dark(
+                                      primary: AttendLensTheme.primaryIndigo,
+                                      onPrimary: Colors.white,
+                                      surface: AttendLensTheme.surfaceDark,
+                                      onSurface: Colors.white,
+                                    ),
+                                  ),
+                                  child: child!,
+                                );
+                              },
+                            );
+                            if (pickedDate != null) {
+                              dobCtrl.text = "${pickedDate.year}-${pickedDate.month.toString().padLeft(2, '0')}-${pickedDate.day.toString().padLeft(2, '0')}";
+                            }
+                          },
                           decoration: _inputDeco('DOB (YYYY-MM-DD)', Icons.calendar_today_outlined),
                         ),
                       ),
@@ -516,7 +541,44 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
                 TextField(controller: rollCtrl, style: GoogleFonts.outfit(color: Colors.white), decoration: _inputDeco('Roll Number', Icons.badge_outlined)),
                 const SizedBox(height: 14),
                 Row(children: [
-                  Expanded(child: TextField(controller: dobCtrl, style: GoogleFonts.outfit(color: Colors.white), decoration: _inputDeco('DOB', Icons.calendar_today_outlined))),
+                  Expanded(
+                    child: TextField(
+                      controller: dobCtrl,
+                      style: GoogleFonts.outfit(color: Colors.white),
+                      readOnly: true,
+                      onTap: () async {
+                        DateTime initDate = DateTime.now().subtract(const Duration(days: 365 * 10));
+                        if (dobCtrl.text.isNotEmpty) {
+                          try {
+                            initDate = DateTime.parse(dobCtrl.text);
+                          } catch (_) {}
+                        }
+                        final DateTime? pickedDate = await showDatePicker(
+                          context: context,
+                          initialDate: initDate,
+                          firstDate: DateTime(1900),
+                          lastDate: DateTime.now(),
+                          builder: (context, child) {
+                            return Theme(
+                              data: Theme.of(context).copyWith(
+                                colorScheme: const ColorScheme.dark(
+                                  primary: AttendLensTheme.primaryIndigo,
+                                  onPrimary: Colors.white,
+                                  surface: AttendLensTheme.surfaceDark,
+                                  onSurface: Colors.white,
+                                ),
+                              ),
+                              child: child!,
+                            );
+                          },
+                        );
+                        if (pickedDate != null) {
+                          dobCtrl.text = "${pickedDate.year}-${pickedDate.month.toString().padLeft(2, '0')}-${pickedDate.day.toString().padLeft(2, '0')}";
+                        }
+                      },
+                      decoration: _inputDeco('DOB', Icons.calendar_today_outlined),
+                    ),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(child: TextField(controller: phoneCtrl, style: GoogleFonts.outfit(color: Colors.white), keyboardType: TextInputType.phone, decoration: _inputDeco('Phone', Icons.phone_outlined))),
                 ]),

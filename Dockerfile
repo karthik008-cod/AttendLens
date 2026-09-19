@@ -25,9 +25,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy backend source code
 COPY backend/ ./backend/
 
-# Set working directory to backend where app.main resides
 WORKDIR /app/backend
-RUN mkdir -p uploads && chmod 777 uploads
+RUN mkdir -p uploads reports generated_omr_sheets && chmod -R 777 uploads reports generated_omr_sheets
 
 # Create non-root user for cloud security (required by HuggingFace Spaces)
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

@@ -2,6 +2,10 @@ backend/uploads/*
 !backend/uploads/.gitkeep
 backend/data/*.db
 backend/reports/*.xlsx
+backend/reports/*.pdf
+backend/generated_omr_sheets/
+backend/test_sheet.pdf
+mobile/android/local.properties
 *.mp4
 *.jpg
 __pycache__/
@@ -11,3 +15,4 @@ __pycache__/
 backend/check_*.py
 backend/test_*.py
 backend/fast_engine.js
+

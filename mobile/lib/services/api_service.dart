@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class ApiService {
-  static String baseUrl = 'https://attendlens.onrender.com/api';
+  static String baseUrl = 'http://127.0.0.1:8000/api';
   static WebSocketChannel? _liveWsChannel;
 
   static WebSocketChannel connectLiveScanWs(int classroomId) {
@@ -45,14 +45,14 @@ class ApiService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_base_url');
-      if (saved != null && saved.isNotEmpty && !saved.contains('10.0.2.2') && !saved.contains('localhost')) {
+      if (saved != null && saved.isNotEmpty && !saved.contains('10.0.2.2') && !saved.contains('onrender.com')) {
         baseUrl = _normalizeUrl(saved);
       } else {
-        baseUrl = 'https://attendlens.onrender.com/api';
+        baseUrl = 'http://127.0.0.1:8000/api';
         await saveBaseUrl(baseUrl);
       }
     } catch (_) {
-      baseUrl = 'https://attendlens.onrender.com/api';
+      baseUrl = 'http://127.0.0.1:8000/api';
     }
   }
 
@@ -229,10 +229,12 @@ class ApiService {
     try {
       final errData = json.decode(res.body);
       if (errData['detail'] != null) throw Exception(errData['detail']);
+    } on FormatException {
+      throw Exception('Server Error (${res.statusCode}). Please try again later.');
     } catch (e) {
-      if (e.toString().contains('Exception: ')) rethrow;
+      if (e is Exception && e.toString().contains('Exception: ')) rethrow;
     }
-    throw Exception('Failed to add student: ${res.body}');
+    throw Exception('Failed to add student: Server returned ${res.statusCode}');
   }
 
   static Future<Map<String, dynamic>> addStudentBatch(
@@ -262,10 +264,12 @@ class ApiService {
     try {
       final errData = json.decode(res.body);
       if (errData['detail'] != null) throw Exception(errData['detail']);
+    } on FormatException {
+      throw Exception('Server Error (${res.statusCode}). Please try again later.');
     } catch (e) {
-      if (e.toString().contains('Exception: ')) rethrow;
+      if (e is Exception && e.toString().contains('Exception: ')) rethrow;
     }
-    throw Exception('Failed to add student in batch: ${res.body}');
+    throw Exception('Failed to add student in batch: Server returned ${res.statusCode}');
   }
 
   static Future<Map<String, dynamic>> uploadStudentsCsv(int classId, File csvFile) async {
@@ -278,10 +282,12 @@ class ApiService {
     try {
       final errData = json.decode(res.body);
       if (errData['detail'] != null) throw Exception(errData['detail']);
+    } on FormatException {
+      throw Exception('Server Error (${res.statusCode}). Please try again later.');
     } catch (e) {
-      if (e.toString().contains('Exception: ')) rethrow;
+      if (e is Exception && e.toString().contains('Exception: ')) rethrow;
     }
-    throw Exception('Failed to upload CSV: ${res.body}');
+    throw Exception('Failed to upload CSV: Server returned ${res.statusCode}');
   }
 
   static Future<Map<String, dynamic>> addStudentPhotosBatch(int studentId, List<File> photos) async {
@@ -298,10 +304,12 @@ class ApiService {
     try {
       final errData = json.decode(res.body);
       if (errData['detail'] != null) throw Exception(errData['detail']);
+    } on FormatException {
+      throw Exception('Server Error (${res.statusCode}). Please try again later.');
     } catch (e) {
-      if (e.toString().contains('Exception: ')) rethrow;
+      if (e is Exception && e.toString().contains('Exception: ')) rethrow;
     }
-    throw Exception('Failed to upload photos: ${res.body}');
+    throw Exception('Failed to upload photos: Server returned ${res.statusCode}');
   }
 
   static Future<void> addStudentPhoto(int studentId, File photo) async {
@@ -430,5 +438,104 @@ class ApiService {
   static String getInviteUrl(int classId) {
     final serverBase = baseUrl.replaceFirst('/api', '');
     return '$serverBase/invite/$classId';
+  }
+
+  // ── OMR Examination & Psychometrics ─────────────────────────────────────────
+
+  static Future<Map<String, dynamic>> createOmrExam({
+    required int teacherId,
+    required String title,
+    String? examDate,
+    required int totalQuestions,
+    required List<Map<String, dynamic>> sections,
+    Map<String, int>? answerKey,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/omr/exams'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({
+        'teacher_id': teacherId,
+        'title': title,
+        'exam_date': examDate ?? DateTime.now().toIso8601String().substring(0, 10),
+        'total_questions': totalQuestions,
+        'sections': sections,
+        'answer_key': answerKey ?? {},
+      }),
+    );
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to create OMR exam: ${res.body}');
+  }
+
+  static Future<List<dynamic>> getOmrExams(int teacherId) async {
+    final res = await http.get(Uri.parse('$baseUrl/omr/exams?teacher_id=$teacherId'));
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to fetch OMR exams');
+  }
+
+  static Future<Map<String, dynamic>> getOmrExam(int examId) async {
+    final res = await http.get(Uri.parse('$baseUrl/omr/exams/$examId'));
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to fetch OMR exam details');
+  }
+
+  static Future<Map<String, dynamic>> updateOmrKey(int examId, Map<String, int> answerKey) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/omr/exams/$examId/key'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'answer_key': answerKey}),
+    );
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to update answer key');
+  }
+
+  static Future<Map<String, dynamic>> uploadOmrKeyPhoto(int examId, File photoFile) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/omr/exams/$examId/key-from-photo'));
+    req.files.add(await http.MultipartFile.fromPath('file', photoFile.path));
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to extract key from photo: ${res.body}');
+  }
+
+  static Future<Map<String, dynamic>> scanSingleOmr(
+    int examId,
+    File photoFile, {
+    String? hallTicket,
+    String? studentName,
+  }) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/omr/exams/$examId/scan'));
+    req.files.add(await http.MultipartFile.fromPath('file', photoFile.path));
+    if (hallTicket != null) req.fields['student_hall_ticket'] = hallTicket;
+    if (studentName != null) req.fields['student_name'] = studentName;
+
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to scan OMR sheet: ${res.body}');
+  }
+
+  static Future<Map<String, dynamic>> bulkScanOmr(int examId, List<File> photoFiles) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/omr/exams/$examId/bulk-scan'));
+    for (final file in photoFiles) {
+      req.files.add(await http.MultipartFile.fromPath('files', file.path));
+    }
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to process batch scans: ${res.body}');
+  }
+
+  static Future<Map<String, dynamic>> getOmrAnalytics(int examId) async {
+    final res = await http.get(Uri.parse('$baseUrl/omr/exams/$examId/analytics'));
+    if (res.statusCode == 200) return json.decode(res.body);
+    throw Exception('Failed to fetch OMR analytics');
+  }
+
+  static String getOmrExcelUrl(int examId) => '$baseUrl/omr/exams/$examId/export/excel';
+  static String getOmrPdfUrl(int examId) => '$baseUrl/omr/exams/$examId/export/pdf';
+
+  static Future<void> deleteOmrExam(int examId) async {
+    final res = await http.delete(Uri.parse('$baseUrl/omr/exams/$examId'));
+    if (res.statusCode != 200) throw Exception('Failed to delete exam');
   }
 }
