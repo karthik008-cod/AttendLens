@@ -45,7 +45,7 @@ class ApiService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_base_url');
-      if (saved != null && saved.isNotEmpty && !saved.contains('10.0.2.2') && !saved.contains('onrender.com')) {
+      if (saved != null && saved.isNotEmpty && !saved.contains('10.0.2.2')) {
         baseUrl = _normalizeUrl(saved);
       } else {
         baseUrl = 'http://127.0.0.1:8000/api';

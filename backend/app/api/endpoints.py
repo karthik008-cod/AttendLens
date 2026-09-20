@@ -22,12 +22,19 @@ import logging
 uvicorn_logger = logging.getLogger("uvicorn.error")
 
 def log_print(msg: str):
-    print(msg, flush=True)
-    sys.stdout.flush()
     try:
+        print(msg, flush=True)
+    except Exception:
+        try:
+            print(msg.encode("ascii", errors="replace").decode("ascii"), flush=True)
+        except Exception:
+            pass
+    try:
+        sys.stdout.flush()
         uvicorn_logger.info(msg)
     except Exception:
         pass
+
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -308,14 +315,13 @@ def delete_class(class_id: int, db = Depends(get_db)):
 @router.get("/classes/{class_id}/students")
 def get_students(class_id: int, db = Depends(get_db)):
     students = list(db.students.find({"classroom_id": class_id}).sort("roll_number", 1))
-    _ensure_student_encodings_ready(students, db)
     return [_student_dict(s, db) for s in students]
 
 
 def _process_photos_sync(student_id: int, file_paths: list, db):
     """Process face encodings SYNCHRONOUSLY during upload. Never stuck on 'processing...'."""
-    log_print(f"📸 [ENROLLMENT] Processing {len(file_paths)} photos for student ID {student_id}...")
     try:
+        log_print(f"📸 [ENROLLMENT] Processing {len(file_paths)} photos for student ID {student_id}...")
         all_encs = []
         for path in file_paths:
             try:

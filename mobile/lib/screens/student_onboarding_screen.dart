@@ -28,6 +28,7 @@ class StudentOnboardingScreen extends StatefulWidget {
 class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
   List<dynamic> _students = [];
   bool _isLoading = true;
+  String? _loadError;
   final ImagePicker _picker = ImagePicker();
 
   @override
@@ -37,12 +38,20 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
   }
 
   Future<void> _loadStudents() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
     try {
       final students = await ApiService.getStudents(widget.classId);
-      if (mounted) setState(() { _students = students; _isLoading = false; });
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() { _students = students; _isLoading = false; _loadError = null; });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _loadError = e.toString().replaceAll("Exception: ", "");
+        });
+      }
     }
   }
 
@@ -842,6 +851,33 @@ class _StudentOnboardingScreenState extends State<StudentOnboardingScreen> {
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: AttendLensTheme.primaryIndigo))
+                : _loadError != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.cloud_off, size: 52, color: Colors.amber),
+                              const SizedBox(height: 12),
+                              Text('Could Not Load Students', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                              const SizedBox(height: 8),
+                              Text(_loadError!, textAlign: TextAlign.center, style: GoogleFonts.outfit(fontSize: 13, color: Colors.white70)),
+                              const SizedBox(height: 18),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AttendLensTheme.primaryIndigo,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                ),
+                                onPressed: _loadStudents,
+                                icon: const Icon(Icons.refresh, size: 18),
+                                label: Text('Retry', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
                 : _students.isEmpty
                     ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                         const Text('👤', style: TextStyle(fontSize: 56)),
