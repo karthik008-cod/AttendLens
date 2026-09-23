@@ -56,7 +56,35 @@ void showServerSettingsDialog(BuildContext context, {VoidCallback? onSaved}) {
                   focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AttendLensTheme.accentCyan)),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ActionChip(
+                    backgroundColor: AttendLensTheme.backgroundDark,
+                    side: const BorderSide(color: Colors.white24),
+                    avatar: const Icon(Icons.cloud_outlined, color: AttendLensTheme.accentCyan, size: 16),
+                    label: Text('☁️ Render Cloud', style: GoogleFonts.outfit(color: Colors.white, fontSize: 12)),
+                    onPressed: () {
+                      setState(() {
+                        urlCtrl.text = 'https://attendlens.onrender.com/api';
+                      });
+                    },
+                  ),
+                  ActionChip(
+                    backgroundColor: AttendLensTheme.backgroundDark,
+                    side: const BorderSide(color: Colors.white24),
+                    avatar: const Icon(Icons.computer, color: AttendLensTheme.accentCyan, size: 16),
+                    label: Text('💻 Local PC (192.168.1.107)', style: GoogleFonts.outfit(color: Colors.white, fontSize: 12)),
+                    onPressed: () {
+                      setState(() {
+                        urlCtrl.text = 'http://192.168.1.107:8000/api';
+                      });
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
               const Divider(color: Colors.white12),
               const SizedBox(height: 14),
 
@@ -174,8 +202,16 @@ void showServerSettingsDialog(BuildContext context, {VoidCallback? onSaved}) {
               );
 
               try {
-                final testUri = Uri.parse(newUrl.replaceAll('/api', '') + '/docs');
-                final res = await http.get(testUri).timeout(const Duration(seconds: 3));
+                final base = newUrl.replaceAll('/api', '');
+                final testUri = Uri.parse('$base/health');
+                http.Response res;
+                try {
+                  res = await http.get(testUri).timeout(const Duration(seconds: 15));
+                } catch (_) {
+                  // Fallback to /docs
+                  res = await http.get(Uri.parse('$base/docs')).timeout(const Duration(seconds: 15));
+                }
+
                 if (res.statusCode == 200 || res.statusCode == 404) {
                   await ApiService.saveBaseUrl(newUrl);
                   setState(() {
@@ -196,7 +232,7 @@ void showServerSettingsDialog(BuildContext context, {VoidCallback? onSaved}) {
                 setState(() {
                   isTesting = false;
                   isSuccess = false;
-                  statusMsg = 'Saved URL & Nudge preferences! But server ping failed: ${e.toString().replaceAll('Exception: ', '')}. Check Wi-Fi.';
+                  statusMsg = 'Saved URL! But server ping failed: ${e.toString().replaceAll('Exception: ', '')}. If using Render free tier, it may be waking up.';
                 });
               }
             },

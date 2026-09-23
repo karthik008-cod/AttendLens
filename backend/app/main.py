@@ -37,6 +37,8 @@ def startup_db_check():
 
 
 @app.get("/")
+@app.get("/health")
+@app.get("/api/health")
 def root():
     return {
         "message": "AttendLens API v2.0 (MongoDB Atlas + OpenCV Engine) Running",

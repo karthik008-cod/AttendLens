@@ -2,8 +2,8 @@ import os
 from pymongo import MongoClient
 
 # MongoDB Atlas Connection String
-MONGO_URI = os.getenv(
-    "MONGO_URI",
+MONGO_URI = os.getenv("MONGO_URI") or os.getenv(
+    "MONGODB_URI",
     "mongodb+srv://yuvaankaarthikeyaa1206_db_user:aykal_1206@attendlens.riy59cn.mongodb.net/?appName=Attendlens"
 )
 
