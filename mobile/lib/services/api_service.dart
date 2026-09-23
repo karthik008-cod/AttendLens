@@ -442,6 +442,19 @@ class ApiService {
 
   // ── OMR Examination & Psychometrics ─────────────────────────────────────────
 
+  static Exception _omrError(http.Response res, String defaultMsg) {
+    if (res.statusCode == 404) {
+      return Exception('$defaultMsg: Endpoint not found (404). Please ensure the backend server has the latest OMR deployment active.');
+    }
+    try {
+      final data = json.decode(res.body);
+      if (data is Map && data.containsKey('detail')) {
+        return Exception('$defaultMsg: ${data['detail']}');
+      }
+    } catch (_) {}
+    return Exception('$defaultMsg (${res.statusCode}): ${res.body}');
+  }
+
   static Future<Map<String, dynamic>> createOmrExam({
     required int teacherId,
     required String title,
@@ -463,19 +476,19 @@ class ApiService {
       }),
     );
     if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception('Failed to create OMR exam: ${res.body}');
+    throw _omrError(res, 'Failed to create OMR exam');
   }
 
   static Future<List<dynamic>> getOmrExams(int teacherId) async {
     final res = await http.get(Uri.parse('$baseUrl/omr/exams?teacher_id=$teacherId'));
     if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception('Failed to fetch OMR exams');
+    throw _omrError(res, 'Failed to fetch OMR exams');
   }
 
   static Future<Map<String, dynamic>> getOmrExam(int examId) async {
     final res = await http.get(Uri.parse('$baseUrl/omr/exams/$examId'));
     if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception('Failed to fetch OMR exam details');
+    throw _omrError(res, 'Failed to fetch OMR exam details');
   }
 
   static Future<Map<String, dynamic>> updateOmrKey(int examId, Map<String, int> answerKey) async {
@@ -485,7 +498,7 @@ class ApiService {
       body: json.encode({'answer_key': answerKey}),
     );
     if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception('Failed to update answer key');
+    throw _omrError(res, 'Failed to update answer key');
   }
 
   static Future<Map<String, dynamic>> uploadOmrKeyPhoto(int examId, File photoFile) async {
@@ -494,7 +507,7 @@ class ApiService {
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception('Failed to extract key from photo: ${res.body}');
+    throw _omrError(res, 'Failed to extract key from photo');
   }
 
   static Future<Map<String, dynamic>> scanSingleOmr(
@@ -511,7 +524,7 @@ class ApiService {
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception('Failed to scan OMR sheet: ${res.body}');
+    throw _omrError(res, 'Failed to scan OMR sheet');
   }
 
   static Future<Map<String, dynamic>> bulkScanOmr(int examId, List<File> photoFiles) async {
@@ -522,13 +535,13 @@ class ApiService {
     final streamed = await req.send();
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception('Failed to process batch scans: ${res.body}');
+    throw _omrError(res, 'Failed to process batch scans');
   }
 
   static Future<Map<String, dynamic>> getOmrAnalytics(int examId) async {
     final res = await http.get(Uri.parse('$baseUrl/omr/exams/$examId/analytics'));
     if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception('Failed to fetch OMR analytics');
+    throw _omrError(res, 'Failed to fetch OMR analytics');
   }
 
   static String getOmrExcelUrl(int examId) => '$baseUrl/omr/exams/$examId/export/excel';
@@ -536,6 +549,6 @@ class ApiService {
 
   static Future<void> deleteOmrExam(int examId) async {
     final res = await http.delete(Uri.parse('$baseUrl/omr/exams/$examId'));
-    if (res.statusCode != 200) throw Exception('Failed to delete exam');
+    if (res.statusCode != 200) throw _omrError(res, 'Failed to delete exam');
   }
 }

@@ -244,18 +244,22 @@ class _OmrExamSetupScreenState extends State<OmrExamSetupScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Exam Sections & Subjects', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                      Text('Divide questions by subject with individual marking', style: GoogleFonts.outfit(fontSize: 12, color: AttendLensTheme.textSecondary)),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Exam Sections & Subjects', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                        const SizedBox(height: 2),
+                        Text('Divide questions by subject with individual marking', style: GoogleFonts.outfit(fontSize: 12, color: AttendLensTheme.textSecondary)),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AttendLensTheme.primaryIndigo,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     icon: const Icon(Icons.add, size: 16),
@@ -327,14 +331,16 @@ class _OmrExamSetupScreenState extends State<OmrExamSetupScreen> {
                             child: TextFormField(
                               initialValue: '${sec['num_questions']}',
                               keyboardType: TextInputType.number,
-                              style: GoogleFonts.outfit(color: Colors.white),
+                              style: GoogleFonts.outfit(color: Colors.white, fontSize: 13),
                               decoration: InputDecoration(
-                                labelText: 'No. of Questions',
-                                prefixIcon: const Icon(Icons.format_list_numbered, color: AttendLensTheme.textSecondary, size: 18),
+                                labelText: 'Questions',
+                                labelStyle: GoogleFonts.outfit(fontSize: 12),
+                                prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                prefixIcon: const Icon(Icons.format_list_numbered, color: AttendLensTheme.textSecondary, size: 16),
                                 filled: true,
                                 fillColor: AttendLensTheme.backgroundDark,
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
                               ),
                               onChanged: (v) {
                                 final n = int.tryParse(v);
@@ -352,14 +358,16 @@ class _OmrExamSetupScreenState extends State<OmrExamSetupScreen> {
                             child: TextFormField(
                               initialValue: '${sec['marks_correct']}',
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              style: GoogleFonts.outfit(color: Colors.white),
+                              style: GoogleFonts.outfit(color: Colors.white, fontSize: 13),
                               decoration: InputDecoration(
-                                labelText: '+ Marks',
-                                prefixIcon: const Icon(Icons.check_circle_outline, color: AttendLensTheme.statusPresent, size: 18),
+                                labelText: '+ Mark',
+                                labelStyle: GoogleFonts.outfit(fontSize: 12),
+                                prefixIconConstraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                prefixIcon: const Icon(Icons.check_circle_outline, color: AttendLensTheme.statusPresent, size: 16),
                                 filled: true,
                                 fillColor: AttendLensTheme.backgroundDark,
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
                               ),
                               onChanged: (v) {
                                 final n = double.tryParse(v);
@@ -375,14 +383,16 @@ class _OmrExamSetupScreenState extends State<OmrExamSetupScreen> {
                             child: TextFormField(
                               initialValue: '${sec['marks_wrong']}',
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              style: GoogleFonts.outfit(color: Colors.white),
+                              style: GoogleFonts.outfit(color: Colors.white, fontSize: 13),
                               decoration: InputDecoration(
                                 labelText: '- Penalty',
-                                prefixIcon: const Icon(Icons.remove_circle_outline, color: AttendLensTheme.statusAbsent, size: 18),
+                                labelStyle: GoogleFonts.outfit(fontSize: 12),
+                                prefixIconConstraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                prefixIcon: const Icon(Icons.remove_circle_outline, color: AttendLensTheme.statusAbsent, size: 16),
                                 filled: true,
                                 fillColor: AttendLensTheme.backgroundDark,
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
                               ),
                               onChanged: (v) {
                                 final n = double.tryParse(v);

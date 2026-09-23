@@ -3,6 +3,7 @@ services:
     name: attendlens-backend
     env: docker
     plan: free
+    branch: main
     dockerfilePath: ./Dockerfile
     healthCheckPath: /
     autoDeploy: true

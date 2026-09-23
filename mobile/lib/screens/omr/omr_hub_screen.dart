@@ -87,28 +87,29 @@ class _OmrHubScreenState extends State<OmrHubScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: AttendLensTheme.primaryIndigo.withOpacity(0.25),
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: AttendLensTheme.primaryIndigo.withOpacity(0.4)),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AttendLensTheme.primaryIndigo.withOpacity(0.25),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: AttendLensTheme.primaryIndigo.withOpacity(0.4)),
+                            ),
+                            child: const Icon(Icons.document_scanner, color: AttendLensTheme.accentCyan, size: 28),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Scan OMR', style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+                                Text(
+                                  'EXAM EVALUATION & PSYCHOMETRICS',
+                                  style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w700, color: AttendLensTheme.accentCyan, letterSpacing: 1.2),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                child: const Icon(Icons.document_scanner, color: AttendLensTheme.accentCyan, size: 28),
-                              ),
-                              const SizedBox(width: 14),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Scan OMR', style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                                  Text('EXAM EVALUATION & PSYCHOMETRICS', style: GoogleFonts.outfit(fontSize: 10, fontWeight: FontWeight.w700, color: AttendLensTheme.accentCyan, letterSpacing: 1.5)),
-                                ],
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                           IconButton(
                             icon: const Icon(Icons.refresh, color: Colors.white70),
